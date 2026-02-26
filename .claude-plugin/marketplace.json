@@ -1,0 +1,12 @@
+{
+  "name": "braintrust-dev",
+  "owner": {"name": "Drew Burchfield", "url": "https://github.com/drewburchfield"},
+  "plugins": [{
+    "name": "braintrust",
+    "source": "./",
+    "description": "Orchestrate other AI CLIs (Gemini, Codex, Claude Code) for second opinions, research, and codebase analysis",
+    "version": "1.3.0",
+    "author": {"name": "Drew Burchfield", "url": "https://github.com/drewburchfield"},
+    "category": "development"
+  }]
+}

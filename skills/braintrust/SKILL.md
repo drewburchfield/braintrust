@@ -24,7 +24,7 @@ This is not optional. The entire value of the braintrust is multi-model coverage
    ```
 3. **Codex**: Use the Bash tool with `run_in_background: true`:
    ```bash
-   codex exec --json "$QUERY" 2>/dev/null > /tmp/codex.json
+   codex exec --json --skip-git-repo-check "$QUERY" 2>/dev/null > /tmp/codex.json
    ```
 
 Present each model's findings to the user as they arrive. After all three respond, synthesize the findings and save a session file.
@@ -83,7 +83,7 @@ This means **all three models are always available** regardless of which harness
 # Diagnostic health checks (only run if needed)
 # Note: Claude health check must run outside Claude Code (nested sessions blocked)
 gemini -p "test" -m gemini-3-flash-preview -o json &>/dev/null && echo "Gemini: OK" || echo "Gemini: FAILED"
-codex exec --json "test" &>/dev/null && echo "Codex: OK" || echo "Codex: FAILED"
+codex exec --json "test" 2>/dev/null | head -5 && echo "Codex: OK" || echo "Codex: FAILED"
 ```
 
 When running from Claude Code, Claude itself is always available via the Task tool. No health check needed.
@@ -91,7 +91,21 @@ When running from Claude Code, Claude itself is always available via the Task to
 **If missing, install:**
 - Claude: `npm install -g @anthropic-ai/claude-code`
 - Gemini: `npm install -g @google/gemini-cli`
-- Codex: `npm install -g @openai/codex`
+- Codex: `npm install -g @openai/codex` (also available via `brew install --cask codex`)
+
+### Common Codex Failure Modes
+
+If Codex fails, check these in order:
+
+| Symptom | Cause | Fix |
+|---------|-------|-----|
+| `You've hit your usage limit` | ChatGPT free/Plus rate limit | Wait for reset or switch to API key auth with `CODEX_API_KEY` |
+| `failed to stat skills entry` (stderr) | Broken symlink in `~/.codex/skills/` | Remove the dead symlink. Non-blocking but noisy. |
+| Hangs on startup | MCP servers in `~/.codex/config.toml` failing to initialize | Check `[mcp_servers]` section. Servers with `required = true` cause immediate exit. Remove or fix broken servers. |
+| `not a git repository` | Codex requires a git repo by default | Add `--skip-git-repo-check` to exec commands |
+| `missing YAML frontmatter` (stderr) | Codex loading incompatible skill files | Non-blocking stderr noise. Safe to ignore. |
+
+**MCP server note:** Codex loads all configured MCP servers on every `exec` call. If you have heavy servers (Playwright, Docker, etc.) in `~/.codex/config.toml`, they add startup latency. For braintrust consultations, Codex doesn't need MCP servers since it's just answering a question.
 
 ## Braintrust Defaults
 
@@ -102,7 +116,7 @@ When running from Claude Code, Claude itself is always available via the Task to
 | **Claude** (from Claude Code) | Task tool with `subagent_type: "general-purpose"` | Task tool with `model: "haiku"` |
 | **Claude** (from other CLIs) | `claude -p "query" --model sonnet --output-format json` | `--model haiku` |
 | **Gemini** | `gemini -p "query" -m gemini-3-pro-preview -o json` | `-m gemini-3-flash-preview` |
-| **Codex** | `codex exec --json "query"` | N/A |
+| **Codex** | `codex exec --json --skip-git-repo-check "query"` | N/A |
 
 ### Model Fallback Chains
 
@@ -112,7 +126,7 @@ If a model returns an error (404, quota, etc.), fall back to the next model in t
 |-----|---------|------------|------------|
 | **Claude** | `opus` | `sonnet` | `haiku` |
 | **Gemini** | `gemini-3-pro-preview` | `gemini-2.5-pro` | `gemini-2.5-flash` |
-| **Codex** | (default) | N/A | N/A |
+| **Codex** | `gpt-5.3-codex` | `gpt-5.3-codex-spark` (Pro only) | N/A |
 
 Preview models (e.g., `gemini-3-*-preview`) are the latest and most capable but may have availability issues. Stable models (e.g., `gemini-2.5-*`) are reliable fallbacks.
 
@@ -159,7 +173,7 @@ Get a second opinion from the braintrust:
 gemini -p "Review this implementation approach: [CONTEXT]" -m gemini-3-pro-preview -o json 2>/dev/null | perl -0777 -pe 's/^[^{]*//' | jq -r '.response'
 
 # Consult Codex (via Bash tool)
-codex exec --json "Review this implementation approach: [CONTEXT]" 2>/dev/null | jq -rs 'map(select(.item.type? == "agent_message")) | last | .item.text'
+codex exec --json --skip-git-repo-check "Review this implementation approach: [CONTEXT]" 2>/dev/null | jq -rs 'map(select(.item.type? == "agent_message")) | last | .item.text'
 
 # Consult Claude (via Task tool, NOT bash)
 # Use Task tool with subagent_type: "general-purpose" and the query as the prompt
@@ -252,7 +266,7 @@ gemini -p "Research: $TOPIC" -m gemini-3-pro-preview -o json 2>/dev/null > /tmp/
 
 **Tool call 3** - Bash tool (run_in_background: true):
 ```bash
-codex exec --json "Research: $TOPIC" 2>/dev/null > /tmp/codex.json
+codex exec --json --skip-git-repo-check "Research: $TOPIC" 2>/dev/null > /tmp/codex.json
 ```
 
 Then read the results:
@@ -390,8 +404,9 @@ Use this format to document the full consultation for future reference:
 
 | Model | Flag Value | Context | Availability |
 |-------|-----------|---------|--------------|
-| Default | (auto-selected) | 192K | ChatGPT auth, no flag needed |
-| Custom | `-m model-name` | varies | API key auth only |
+| **GPT-5.3 Codex** | `gpt-5.3-codex` (default) | 192K | ChatGPT auth (Plus/Pro/Team/Enterprise) |
+| **GPT-5.3 Codex Spark** | `gpt-5.3-codex-spark` | varies | ChatGPT Pro only (research preview) |
+| Custom | `-m model-name` | varies | API key auth (`CODEX_API_KEY`) |
 
 ## Output Parsing
 
@@ -432,7 +447,7 @@ Parse with: `jq -rs 'map(select(.item.type? == "agent_message")) | last | .item.
 
 **Alternative:** Use `--output-schema` for structured responses or `-o path` to write the final message to a file:
 ```bash
-codex exec --json "query" -o /tmp/codex-result.txt
+codex exec --json --skip-git-repo-check "query" -o /tmp/codex-result.txt
 ```
 
 ## Common Use Cases
@@ -507,7 +522,7 @@ AUDIT_PROMPT="Review this codebase for security vulnerabilities:
 4. CSRF protection
 5. Secrets in code
 6. Rate limiting gaps"
-codex exec --json "$AUDIT_PROMPT" 2>/dev/null > /tmp/codex-security.json
+codex exec --json --skip-git-repo-check "$AUDIT_PROMPT" 2>/dev/null > /tmp/codex-security.json
 ```
 
 Then collect and compare findings from all three.
@@ -557,7 +572,7 @@ gemini -p "Research: best practices for implementing rate limiting in Node.js AP
 
 **Tool call 3** - Bash tool (run_in_background: true):
 ```bash
-codex exec --json "Research: best practices for implementing rate limiting in Node.js APIs" 2>/dev/null > /tmp/codex.json
+codex exec --json --skip-git-repo-check "Research: best practices for implementing rate limiting in Node.js APIs" 2>/dev/null > /tmp/codex.json
 ```
 
 Then synthesize findings from all three sources.
@@ -592,15 +607,18 @@ Then synthesize findings from all three sources.
 ### Codex
 | Flag | Purpose |
 |------|---------|
-| `exec` | Non-interactive subcommand |
+| `exec` | Non-interactive subcommand (alias: `e`) |
 | `--json` | JSONL output stream |
-| `--full-auto` | Allow edits within sandbox (needed for write operations) |
+| `--full-auto` | Low-friction preset: workspace-write + on-request approvals |
 | `-s, --sandbox` | Sandbox policy: read-only/workspace-write/danger-full-access |
 | `-m, --model` | Model selection (API key auth only) |
+| `-i, --image` | Attach images for visual context (repeatable, comma-separated) |
+| `-C, --cd` | Set working directory before executing |
 | `--output-schema` | Structured JSON response matching a schema |
 | `-o, --output-last-message` | Write final message to file |
 | `--ephemeral` | Skip persisting session files |
 | `--skip-git-repo-check` | Run outside a git repo |
+| `--color` | ANSI color control: always/never/auto |
 
 ## Tips
 

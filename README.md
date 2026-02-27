@@ -2,17 +2,11 @@
 
 <img src="https://ghrb.waren.build/banner?header=braintrust%20%F0%9F%A7%A0&subheader=Orchestrate%20AI%20CLIs%20for%20second%20opinions%20and%20research&bg=0a1628&secondaryBg=1e3a5f&color=e8f0fe&subheaderColor=7eb8da&headerFont=Inter&subheaderFont=Inter&support=false" alt="braintrust" width="100%">
 
-<br><br>
-
-**Orchestrate AI CLIs for second opinions and research.**
-
 A [Claude Code](https://docs.anthropic.com/en/docs/claude-code) plugin from the [not-my-job](https://github.com/drewburchfield/not-my-job) marketplace.
 
 ![License](https://img.shields.io/badge/license-MIT-blue)
 
 </div>
-
-<br>
 
 ## What it does
 

@@ -17,15 +17,20 @@ This is not optional. The entire value of the braintrust is multi-model coverage
 
 **Launch all three in a single parallel batch using multiple tool calls in one response:**
 
+> **First call in a session?** Run the model probe (see "Model Discovery" section) before launching consultations. This takes ~10 seconds and ensures you use the best available Gemini model. If `/tmp/bt_models.env` already exists from an earlier call, skip the probe.
+
 1. **Claude**: Use the Task tool with `subagent_type: "general-purpose"` and `run_in_background: true`
-2. **Gemini**: Use the Bash tool with `run_in_background: true`:
+2. **Gemini** (if `bt_gemini_available=true`): Use the Bash tool with `run_in_background: true`:
    ```bash
-   gemini -p "$QUERY" -m gemini-3-pro -o json 2>/dev/null > /tmp/gemini.json
+   source /tmp/bt_models.env 2>/dev/null || bt_gemini_model="gemini-2.5-pro"
+   gemini -p "$QUERY" -m "$bt_gemini_model" -o json 2>/dev/null > /tmp/gemini.json
    ```
-3. **Codex**: Use the Bash tool with `run_in_background: true`:
+3. **Codex** (if `bt_codex_available=true`): Use the Bash tool with `run_in_background: true`:
    ```bash
    codex exec --json --skip-git-repo-check "$QUERY" 2>/dev/null > /tmp/codex.json
    ```
+
+> **Skip unavailable CLIs.** If the probe marked a CLI as unavailable, do not launch it. Note the gap in your synthesis instead.
 
 Present each model's findings to the user as they arrive. After all three respond, synthesize the findings and save a session file.
 
@@ -82,7 +87,8 @@ This means **all three models are always available** regardless of which harness
 ```bash
 # Diagnostic health checks (only run if needed)
 # Note: Claude health check must run outside Claude Code (nested sessions blocked)
-gemini -p "test" -m gemini-3-flash -o json 2>/dev/null && echo "Gemini: OK" || echo "Gemini: FAILED"
+source /tmp/bt_models.env 2>/dev/null || bt_gemini_fast="gemini-2.5-flash"
+gemini -p "test" -m "$bt_gemini_fast" -o json 2>/dev/null && echo "Gemini: OK" || echo "Gemini: FAILED"
 codex exec --json "test" 2>/dev/null | head -5 && echo "Codex: OK" || echo "Codex: FAILED"
 ```
 
@@ -92,6 +98,8 @@ When running from Claude Code, Claude itself is always available via the Task to
 - Claude: `npm install -g @anthropic-ai/claude-code`
 - Gemini: `npm install -g @google/gemini-cli` (also available via `brew install gemini-cli`)
 - Codex: `npm install -g @openai/codex` (also available via `brew install --cask codex`)
+
+**Required utilities:** `jq` and `perl` are used for parsing CLI output. Both are pre-installed on macOS. On Linux: `apt install jq` or `brew install jq`.
 
 ### Common Codex Failure Modes
 
@@ -115,20 +123,138 @@ If Codex fails, check these in order:
 |-----|-----------------|-------------|
 | **Claude** (from Claude Code) | Task tool with `subagent_type: "general-purpose"` | Task tool with `model: "haiku"` |
 | **Claude** (from other CLIs) | `claude -p "query" --model sonnet --output-format json` | `--model haiku` |
-| **Gemini** | `gemini -p "query" -m gemini-3-pro -o json` | `-m gemini-3-flash` |
-| **Codex** | `codex exec --json --skip-git-repo-check "query"` | N/A |
+| **Gemini** | Uses `$bt_gemini_model` from model probe (see below) | Uses `$bt_gemini_fast` from model probe |
+| **Codex** | `codex exec --json --skip-git-repo-check "query" 2>/dev/null` | N/A |
+
+### Model Discovery (Run Once Per Session)
+
+**Model names change frequently.** Instead of hardcoding model IDs, run this probe at the start of each braintrust session to discover the best available models for each CLI. Cache the results in `/tmp/bt_models.env` and source them for all subsequent calls.
+
+```bash
+cat > /tmp/bt_probe.sh << 'PROBE'
+#!/bin/bash
+# Braintrust model probe - discovers best available model for each CLI
+# Tries models in priority order (best first), picks the first that responds
+
+echo "--- Braintrust Model Probe ---"
+
+# Use timeout if available, otherwise run without it
+if command -v timeout &>/dev/null; then
+  TIMEOUT_CMD="timeout"
+elif command -v gtimeout &>/dev/null; then
+  TIMEOUT_CMD="gtimeout"
+else
+  TIMEOUT_CMD=""
+fi
+run_with_timeout() { if [ -n "$TIMEOUT_CMD" ]; then $TIMEOUT_CMD "$@"; else shift; "$@"; fi; }
+
+# --- Gemini ---
+bt_gemini_model=""
+bt_gemini_fast=""
+bt_gemini_available="false"
+if command -v gemini &>/dev/null; then
+  gemini_probe() {
+    run_with_timeout 15 gemini -p "ok" -m "$1" -o json 2>/dev/null | grep -q '"response"'
+  }
+  for m in "gemini-3.1-pro-preview" "gemini-2.5-pro"; do
+    if gemini_probe "$m"; then bt_gemini_model="$m"; break; fi
+  done
+  for m in "gemini-3-flash-preview" "gemini-2.5-flash"; do
+    if gemini_probe "$m"; then bt_gemini_fast="$m"; break; fi
+  done
+  if [ -n "$bt_gemini_model" ]; then
+    bt_gemini_available="true"
+    echo "Gemini: $bt_gemini_model (fast: $bt_gemini_fast)"
+  else
+    echo "Gemini: CLI found but no models responded"
+  fi
+else
+  echo "Gemini: CLI not installed"
+fi
+
+# --- Codex ---
+bt_codex_available="false"
+if command -v codex &>/dev/null; then
+  codex_result=$(run_with_timeout 30 codex exec --json --skip-git-repo-check "Say ok" 2>/dev/null | jq -rs 'map(select(.item.type? == "agent_message")) | last | .item.text' 2>/dev/null)
+  if [ -n "$codex_result" ] && [ "$codex_result" != "null" ]; then
+    bt_codex_available="true"
+    echo "Codex: available"
+  else
+    echo "Codex: CLI found but returned empty response"
+  fi
+else
+  echo "Codex: CLI not installed"
+fi
+
+# --- Claude (from Claude Code) ---
+# Always available via Task tool when running in Claude Code. No probe needed.
+echo "Claude: available (via Task tool)"
+
+# Write results
+cat > /tmp/bt_models.env << EOF
+bt_gemini_model=${bt_gemini_model:-gemini-2.5-pro}
+bt_gemini_fast=${bt_gemini_fast:-gemini-2.5-flash}
+bt_gemini_available=${bt_gemini_available}
+bt_codex_available=${bt_codex_available}
+EOF
+
+echo "--- Results cached to /tmp/bt_models.env ---"
+cat /tmp/bt_models.env
+PROBE
+chmod +x /tmp/bt_probe.sh && bash /tmp/bt_probe.sh
+```
+
+After the probe runs, use the discovered models in all commands:
+
+```bash
+# Source at the start of each Bash tool call that invokes Gemini or Codex
+source /tmp/bt_models.env 2>/dev/null || bt_gemini_model="gemini-2.5-pro"
+```
+
+**Graceful degradation rules:**
+- If `bt_gemini_available=false`, skip Gemini and note it in the synthesis
+- If `bt_codex_available=false`, skip Codex and note it in the synthesis
+- Claude is always available via the Task tool when running in Claude Code
+- If only one CLI is available, run it alone and note the limited coverage
+- **Never let a single CLI failure block the entire braintrust consultation**
+
+### Handling Errors During Consultation
+
+Even after the probe, a model can fail mid-consultation (quota, rate limit, transient error). Wrap every CLI call to detect and report failures:
+
+```bash
+# Gemini with error detection
+source /tmp/bt_models.env 2>/dev/null || bt_gemini_model="gemini-2.5-pro"
+gemini -p "$QUERY" -m "$bt_gemini_model" -o json 2>/dev/null > /tmp/gemini.json
+if ! grep -q '"response"' /tmp/gemini.json 2>/dev/null; then
+  echo "GEMINI_FAILED: $(cat /tmp/gemini.json 2>/dev/null | perl -0777 -pe 's/^[^{]*//' | jq -r '.error.message // "unknown error"' 2>/dev/null)"
+else
+  perl -0777 -pe 's/^[^{]*//' /tmp/gemini.json | jq -r '.response'
+fi
+
+# Codex with error detection (CRITICAL: always redirect stderr to avoid blank output)
+codex exec --json --skip-git-repo-check "$QUERY" 2>/dev/null > /tmp/codex.json
+codex_response=$(jq -rs 'map(select(.item.type? == "agent_message")) | last | .item.text' /tmp/codex.json 2>/dev/null)
+if [ -z "$codex_response" ] || [ "$codex_response" = "null" ]; then
+  echo "CODEX_FAILED: empty or unparseable response"
+else
+  echo "$codex_response"
+fi
+```
+
+> **Codex blank output fix:** Codex writes skill-loading noise and warnings to stderr. If stderr is not redirected with `2>/dev/null`, it corrupts the JSONL stream and `jq` silently returns nothing. **Always use `2>/dev/null`** when piping Codex output.
 
 ### Model Fallback Chains
 
-If a model returns an error (404, quota, etc.), fall back to the next model in the chain:
+If a model returns an error (404, quota, etc.), fall back to the next model in the chain. The probe handles Gemini automatically. For manual fallback:
 
 | CLI | Primary | Fallback 1 | Fallback 2 |
 |-----|---------|------------|------------|
 | **Claude** | `opus` | `sonnet` | `haiku` |
-| **Gemini** | `gemini-3.1-pro` | `gemini-3-pro` | `gemini-2.5-flash` |
-| **Codex** | `gpt-5.3-codex` | `gpt-5.3-codex-spark` (Pro only) | N/A |
+| **Gemini** | `gemini-3.1-pro-preview` | `gemini-2.5-pro` | N/A |
+| **Codex** | (default, currently gpt-5.4) | N/A | N/A |
 
-Gemini 3.x models are now stable (no longer "preview"). The 2.5 series remains available as a fallback if 3.x has availability issues.
+> **Gemini model naming:** Google uses `-preview` suffixes for newer model families (3.x). These are production-quality but the names may change. The probe handles this automatically. Stable models (2.5 series) don't have the `-preview` suffix.
 
 ## When to Consult the Braintrust
 
@@ -136,12 +262,12 @@ Gemini 3.x models are now stable (no longer "preview"). The 2.5 series remains a
 
 | Use Case | Best Model(s) | Why It Works |
 |----------|---------------|--------------|
-| **Design & Frontend Review** | Gemini 3 Pro | Strong on WebDev benchmarks, high accuracy on UI challenges, generates pixel-perfect code from sketches |
+| **Design & Frontend Review** | Gemini (best available) | Strong on WebDev benchmarks, high accuracy on UI challenges, generates pixel-perfect code from sketches |
 | **Architecture Review** | Gemini (primary) | 1M context analyzes 40K+ lines holistically; understands how components interact across entire codebase |
 | **Cross-Model Code Review** | Different than author | The model that wrote code has blind spots to its own bugs; fresh eyes catch issues instantly |
 | **System-Wide Bug Investigation** | Gemini + Claude | Gemini for cross-file pattern detection, Claude for detailed fix implementation |
 | **Security Audit** | Parallel all three | Verify auth patterns, SQL injection protection, rate limiting - each model catches different vulnerabilities |
-| **Design System Extraction** | Gemini 3 Pro | Analyzes brand elements (colors, fonts, spacing), generates consistent component libraries |
+| **Design System Extraction** | Gemini (best available) | Analyzes brand elements (colors, fonts, spacing), generates consistent component libraries |
 | **Framework Migration** | Gemini | Side-by-side comparisons (React->Vue, Django->Flask), translates patterns with full context |
 | **Parallel Research** | All three | 3x speed, diverse sources, cross-validate findings |
 
@@ -166,11 +292,12 @@ Gemini 3.x models are now stable (no longer "preview"). The 2.5 series remains a
 
 ### Standard Consultation (from Claude Code)
 
-Get a second opinion from the braintrust:
+Get a second opinion from the braintrust. **Always source the model probe first:**
 
 ```bash
-# Consult Gemini (via Bash tool)
-gemini -p "Review this implementation approach: [CONTEXT]" -m gemini-3-pro -o json 2>/dev/null | perl -0777 -pe 's/^[^{]*//' | jq -r '.response'
+# Consult Gemini (via Bash tool) - uses probed model
+source /tmp/bt_models.env 2>/dev/null || bt_gemini_model="gemini-2.5-pro"
+gemini -p "Review this implementation approach: [CONTEXT]" -m "$bt_gemini_model" -o json 2>/dev/null | perl -0777 -pe 's/^[^{]*//' | jq -r '.response'
 
 # Consult Codex (via Bash tool)
 codex exec --json --skip-git-repo-check "Review this implementation approach: [CONTEXT]" 2>/dev/null | jq -rs 'map(select(.item.type? == "agent_message")) | last | .item.text'
@@ -188,20 +315,22 @@ claude -p "Review this implementation approach: [CONTEXT]" --model sonnet --outp
 
 ### Design & Frontend Review (Gemini's Strength)
 
-Gemini 3 Pro shows strong performance on frontend challenges. It thinks in design systems, not individual components:
+Gemini shows strong performance on frontend challenges. It thinks in design systems, not individual components:
 
 ```bash
+# All examples below assume: source /tmp/bt_models.env 2>/dev/null || bt_gemini_model="gemini-2.5-pro"
+
 # Review UI component design
-gemini -p "@src/components/ Review the design consistency. Are we following a coherent design system? Check spacing, typography scale, color usage." -m gemini-3-pro -o json 2>/dev/null | perl -0777 -pe 's/^[^{]*//' | jq -r '.response'
+gemini -p "@src/components/ Review the design consistency. Are we following a coherent design system? Check spacing, typography scale, color usage." -m "$bt_gemini_model" -o json 2>/dev/null | perl -0777 -pe 's/^[^{]*//' | jq -r '.response'
 
 # Generate component from sketch (drag image into terminal)
-gemini -p "@sketch.png Generate a React component with Tailwind CSS that matches this design exactly" -m gemini-3-pro -o json 2>/dev/null | perl -0777 -pe 's/^[^{]*//' | jq -r '.response'
+gemini -p "@sketch.png Generate a React component with Tailwind CSS that matches this design exactly" -m "$bt_gemini_model" -o json 2>/dev/null | perl -0777 -pe 's/^[^{]*//' | jq -r '.response'
 
 # Extract design system from existing code
-gemini -p "@src/styles/ @src/components/ Extract the implicit design system: color palette, spacing scale, typography, component patterns" -m gemini-3-pro -o json 2>/dev/null | perl -0777 -pe 's/^[^{]*//' | jq -r '.response'
+gemini -p "@src/styles/ @src/components/ Extract the implicit design system: color palette, spacing scale, typography, component patterns" -m "$bt_gemini_model" -o json 2>/dev/null | perl -0777 -pe 's/^[^{]*//' | jq -r '.response'
 
 # Review accessibility
-gemini -p "@src/components/ Audit for accessibility: semantic HTML, ARIA attributes, keyboard navigation, color contrast" -m gemini-3-pro -o json 2>/dev/null | perl -0777 -pe 's/^[^{]*//' | jq -r '.response'
+gemini -p "@src/components/ Audit for accessibility: semantic HTML, ARIA attributes, keyboard navigation, color contrast" -m "$bt_gemini_model" -o json 2>/dev/null | perl -0777 -pe 's/^[^{]*//' | jq -r '.response'
 ```
 
 ### Codebase Analysis (Gemini's 1M Context)
@@ -209,17 +338,19 @@ gemini -p "@src/components/ Audit for accessibility: semantic HTML, ARIA attribu
 Gemini has 1M token native context, ideal for whole-codebase work. Testing shows it can analyze 40K+ lines while maintaining architectural understanding:
 
 ```bash
+# All examples below assume: source /tmp/bt_models.env 2>/dev/null || bt_gemini_model="gemini-2.5-pro"
+
 # Analyze entire codebase
-gemini -p "@src/ @lib/ What architectural patterns are used?" -m gemini-3-pro -o json 2>/dev/null | perl -0777 -pe 's/^[^{]*//' | jq -r '.response'
+gemini -p "@src/ @lib/ What architectural patterns are used?" -m "$bt_gemini_model" -o json 2>/dev/null | perl -0777 -pe 's/^[^{]*//' | jq -r '.response'
 
 # Find patterns across files
-gemini -p "@./ How is error handling implemented across the codebase?" -m gemini-3-pro -o json 2>/dev/null | perl -0777 -pe 's/^[^{]*//' | jq -r '.response'
+gemini -p "@./ How is error handling implemented across the codebase?" -m "$bt_gemini_model" -o json 2>/dev/null | perl -0777 -pe 's/^[^{]*//' | jq -r '.response'
 
 # Compare implementations
-gemini -p "@src/auth/ @src/api/ Are these using consistent patterns?" -m gemini-3-pro -o json 2>/dev/null | perl -0777 -pe 's/^[^{]*//' | jq -r '.response'
+gemini -p "@src/auth/ @src/api/ Are these using consistent patterns?" -m "$bt_gemini_model" -o json 2>/dev/null | perl -0777 -pe 's/^[^{]*//' | jq -r '.response'
 
 # Holistic refactoring suggestions
-gemini -p "@src/ Suggest refactoring improvements that require understanding of the full system, not just individual files" -m gemini-3-pro -o json 2>/dev/null | perl -0777 -pe 's/^[^{]*//' | jq -r '.response'
+gemini -p "@src/ Suggest refactoring improvements that require understanding of the full system, not just individual files" -m "$bt_gemini_model" -o json 2>/dev/null | perl -0777 -pe 's/^[^{]*//' | jq -r '.response'
 ```
 
 ### Maximum Reasoning (Hard Problems)
@@ -227,12 +358,14 @@ gemini -p "@src/ Suggest refactoring improvements that require understanding of 
 For the hardest problems, use flagship models:
 
 ```bash
+source /tmp/bt_models.env 2>/dev/null || bt_gemini_model="gemini-2.5-pro"
+
 # Claude Opus - use Task tool with model: "opus" from Claude Code
 # Or from other CLIs:
 claude -p "[HARD PROBLEM]" --model opus --output-format json
 
-# Gemini 3 Pro Preview (default, 1M context)
-gemini -p "[HARD PROBLEM]" -m gemini-3-pro -o json 2>/dev/null | perl -0777 -pe 's/^[^{]*//' | jq -r '.response'
+# Gemini (best available, 1M context)
+gemini -p "[HARD PROBLEM]" -m "$bt_gemini_model" -o json 2>/dev/null | perl -0777 -pe 's/^[^{]*//' | jq -r '.response'
 ```
 
 ### Fast Consultations
@@ -245,7 +378,8 @@ When speed matters more than depth:
 claude -p "[QUERY]" --model haiku --output-format json
 
 # Gemini Flash
-gemini -p "[QUERY]" -m gemini-3-flash -o json 2>/dev/null | perl -0777 -pe 's/^[^{]*//' | jq -r '.response'
+source /tmp/bt_models.env 2>/dev/null || bt_gemini_fast="gemini-2.5-flash"
+gemini -p "[QUERY]" -m "$bt_gemini_fast" -o json 2>/dev/null | perl -0777 -pe 's/^[^{]*//' | jq -r '.response'
 ```
 
 ### Parallel Research (from Claude Code)
@@ -261,7 +395,8 @@ model: "sonnet"
 
 **Tool call 2** - Bash tool (run_in_background: true):
 ```bash
-gemini -p "Research: $TOPIC" -m gemini-3-pro -o json 2>/dev/null > /tmp/gemini.json
+source /tmp/bt_models.env 2>/dev/null || bt_gemini_model="gemini-2.5-pro"
+gemini -p "Research: $TOPIC" -m "$bt_gemini_model" -o json 2>/dev/null > /tmp/gemini.json
 ```
 
 **Tool call 3** - Bash tool (run_in_background: true):
@@ -301,11 +436,10 @@ IMPORTANT: After your analysis, include a 'Self-Critique' section with 2-3 bulle
 
 ### Why It Works
 
-A/B testing showed:
-- 100% compliance across all models (Gemini, Codex, Claude)
-- **40% more issues discovered** in primary analysis (not just the self-critique section)
+In practice:
+- All models (Gemini, Codex, Claude) consistently follow the self-critique instruction
+- The primary analysis tends to be more thorough when self-critique is requested
 - Models surface context dependencies, scope limitations, and assumptions
-- Responses are ~50% longer but significantly more valuable
 
 ### Example
 
@@ -315,7 +449,7 @@ gemini -p "Review this function for bugs: async function fetchUser(id) {
   const response = await fetch('/api/users/' + id);
   const data = response.json();
   return data;
-}" -m gemini-3-flash -o json 2>/dev/null | perl -0777 -pe 's/^[^{]*//' | jq -r '.response'
+}" -m "$bt_gemini_fast" -o json 2>/dev/null | perl -0777 -pe 's/^[^{]*//' | jq -r '.response'
 
 # With self-critique (finds 4 bugs)
 gemini -p "Review this function for bugs: async function fetchUser(id) {
@@ -324,7 +458,7 @@ gemini -p "Review this function for bugs: async function fetchUser(id) {
   return data;
 }
 
-IMPORTANT: After your analysis, include a 'Self-Critique' section with 2-3 bullets identifying limitations or uncertainties in your review." -m gemini-3-flash -o json 2>/dev/null | perl -0777 -pe 's/^[^{]*//' | jq -r '.response'
+IMPORTANT: After your analysis, include a 'Self-Critique' section with 2-3 bullets identifying limitations or uncertainties in your review." -m "$bt_gemini_fast" -o json 2>/dev/null | perl -0777 -pe 's/^[^{]*//' | jq -r '.response'
 ```
 
 ## Context Packaging: Project-Aware Queries
@@ -381,33 +515,36 @@ Use this format to document the full consultation for future reference:
 
 ## Model Reference
 
-> **Note:** Model names and flags evolve as CLIs update. Verify current model names with `claude --help`, `gemini --help`, or `codex --help` if commands fail. The examples below reflect tested, working model names as of February 2026.
+> **Note:** Model names change frequently. Use the model probe (see "Model Discovery") instead of hardcoding. The table below is a reference snapshot. Run the probe to get current model IDs.
 
 ### Claude Code
 
 | Model | Flag Value | Context | Use Case |
 |-------|-----------|---------|----------|
-| **Sonnet 4.5** | `sonnet` | 200K | Default - balanced performance |
+| **Sonnet 4.5** | `sonnet` | 200K | Default, balanced performance |
 | **Opus 4.6** | `opus` | 200K | Hardest reasoning problems |
 | **Haiku 4.5** | `haiku` | 200K | Speed, cost efficiency |
 
-### Gemini
+### Gemini (as of March 2026)
 
-| Model | Flag Value | Context | Use Case |
-|-------|-----------|---------|----------|
-| **Gemini 3.1 Pro** | `gemini-3.1-pro` | 1M | Latest - maximum reasoning |
-| **Gemini 3 Pro** | `gemini-3-pro` | 1M | Default - stable and capable |
-| **Gemini 2.5 Pro** | `gemini-2.5-pro` | 1M | Legacy fallback |
-| **Gemini 3 Flash** | `gemini-3-flash` | 1M | Speed - fast and capable |
-| **Gemini 2.5 Flash** | `gemini-2.5-flash` | 1M | Stable fast fallback |
+| Model | Flag Value | Context | Status |
+|-------|-----------|---------|--------|
+| **Gemini 3.1 Pro** | `gemini-3.1-pro-preview` | 1M | Preview, most capable |
+| **Gemini 3 Pro** | `gemini-3-pro-preview` | 1M | **Shut down March 9, 2026** |
+| **Gemini 2.5 Pro** | `gemini-2.5-pro` | 1M | Stable, reliable fallback |
+| **Gemini 3 Flash** | `gemini-3-flash-preview` | 1M | Preview, fast |
+| **Gemini 2.5 Flash** | `gemini-2.5-flash` | 1M | Stable, fast fallback |
 
-> **Auto-routing:** Without `-m`, Gemini CLI auto-routes between 2.5 Flash (simple queries) and 3 Pro (complex). For braintrust, always specify `-m` to ensure the strongest model.
+> **Auto-routing:** Without `-m`, Gemini CLI auto-routes to weaker models. For braintrust, always specify `-m` to ensure the strongest model. The model probe handles this automatically.
+>
+> **Naming pattern:** Google's 3.x models require `-preview` suffix. The bare names (e.g., `gemini-3-pro`) return 404. This has been a common source of breakage.
 
-### Codex
+### Codex (as of March 2026)
 
 | Model | Flag Value | Context | Availability |
 |-------|-----------|---------|--------------|
-| **GPT-5.3 Codex** | `gpt-5.3-codex` (default) | 192K | ChatGPT auth (Plus/Pro/Team/Enterprise) |
+| **GPT-5.4** | (default) | 192K | ChatGPT auth (Plus/Pro/Team/Enterprise) |
+| **GPT-5.3 Codex** | `gpt-5.3-codex` | 192K | Previous default |
 | **GPT-5.3 Codex Spark** | `gpt-5.3-codex-spark` | varies | ChatGPT Pro only (research preview) |
 | Custom | `-m model-name` | varies | API key auth (`CODEX_API_KEY`) |
 
@@ -438,6 +575,8 @@ The Task tool returns the response text directly. No JSON parsing needed.
 Parse with: `perl -0777 -pe 's/^[^{]*//' | jq -r '.response'`
 
 > **Note:** Gemini may print MCP server notifications to stdout before the JSON (on the same line as the opening brace). The `perl -0777 -pe 's/^[^{]*//'` strips everything before the first `{`. If your environment has no MCP servers configured, `jq -r '.response'` alone works fine.
+>
+> **File context in headless mode:** `@path` references work when placed *inside* the `-p` string (e.g., `-p "@src/ Review this"`). They fail when passed as a *separate positional argument* alongside `-p` (e.g., `-p "Review this" @src/`). For files not in the working directory, pipe content via stdin: `cat file.txt | gemini -p "Review this:" -m "$bt_gemini_model" -o json`
 
 ### Codex JSONL Output (streaming)
 ```jsonl
@@ -455,6 +594,8 @@ codex exec --json --skip-git-repo-check "query" -o /tmp/codex-result.txt
 
 ## Common Use Cases
 
+> **Note:** All examples below assume the model probe has been run and `source /tmp/bt_models.env` is called at the start of each Bash tool invocation.
+
 ### 1. Design & Frontend Review
 
 ```bash
@@ -464,17 +605,17 @@ gemini -p "@src/components/ Review these components for:
 2. Accessibility compliance
 3. Responsive design patterns
 4. Component API design (props, composition)
-What's working well? What needs improvement?" -m gemini-3-pro -o json 2>/dev/null | perl -0777 -pe 's/^[^{]*//' | jq -r '.response'
+What's working well? What needs improvement?" -m "$bt_gemini_model" -o json 2>/dev/null | perl -0777 -pe 's/^[^{]*//' | jq -r '.response'
 
 # Generate pixel-perfect code from a design mockup
-gemini -p "@mockup.png Implement this design as a React component with Tailwind CSS. Match the exact spacing, colors, and typography." -m gemini-3-pro -o json 2>/dev/null | perl -0777 -pe 's/^[^{]*//' | jq -r '.response'
+gemini -p "@mockup.png Implement this design as a React component with Tailwind CSS. Match the exact spacing, colors, and typography." -m "$bt_gemini_model" -o json 2>/dev/null | perl -0777 -pe 's/^[^{]*//' | jq -r '.response'
 ```
 
 ### 2. Architecture Review
 
 ```bash
 # Get Gemini's take on overall architecture (uses 1M context)
-gemini -p "@src/ Analyze the architecture. What are the main components and how do they interact? Identify any architectural debt or inconsistencies." -m gemini-3-pro -o json 2>/dev/null | perl -0777 -pe 's/^[^{]*//' | jq -r '.response'
+gemini -p "@src/ Analyze the architecture. What are the main components and how do they interact? Identify any architectural debt or inconsistencies." -m "$bt_gemini_model" -o json 2>/dev/null | perl -0777 -pe 's/^[^{]*//' | jq -r '.response'
 ```
 
 ### 3. Cross-Model Code Review
@@ -486,7 +627,7 @@ gemini -p "@src/features/auth/ Review these changes as if you're a senior develo
 - Security issues
 - Performance concerns
 - Patterns inconsistent with the rest of the codebase
-- Missed edge cases" -m gemini-3-pro -o json 2>/dev/null | perl -0777 -pe 's/^[^{]*//' | jq -r '.response'
+- Missed edge cases" -m "$bt_gemini_model" -o json 2>/dev/null | perl -0777 -pe 's/^[^{]*//' | jq -r '.response'
 ```
 
 ### 4. Security Audit (Parallel, from Claude Code)
@@ -513,7 +654,7 @@ gemini -p "@src/ Review this codebase for security vulnerabilities:
 3. XSS vulnerabilities
 4. CSRF protection
 5. Secrets in code
-6. Rate limiting gaps" -m gemini-3-pro -o json 2>/dev/null > /tmp/gemini-security.json
+6. Rate limiting gaps" -m "$bt_gemini_model" -o json 2>/dev/null > /tmp/gemini-security.json
 ```
 
 **Tool call 3** - Bash tool (run_in_background: true):
@@ -542,7 +683,7 @@ Trace the request flow from entry point to database. Identify:
 2. Connection pooling configuration
 3. Timeout settings
 4. Retry logic (or lack thereof)
-5. Error handling gaps" -m gemini-3-pro -o json 2>/dev/null | perl -0777 -pe 's/^[^{]*//' | jq -r '.response'
+5. Error handling gaps" -m "$bt_gemini_model" -o json 2>/dev/null | perl -0777 -pe 's/^[^{]*//' | jq -r '.response'
 ```
 
 ### 6. Framework Migration Planning
@@ -554,7 +695,7 @@ gemini -p "@src/ We're considering migrating from React class components to hook
 2. Migration complexity per component
 3. Suggested migration order
 4. Potential breaking changes
-5. Testing strategy" -m gemini-3-pro -o json 2>/dev/null | perl -0777 -pe 's/^[^{]*//' | jq -r '.response'
+5. Testing strategy" -m "$bt_gemini_model" -o json 2>/dev/null | perl -0777 -pe 's/^[^{]*//' | jq -r '.response'
 ```
 
 ### 7. Parallel Research (from Claude Code)
@@ -570,7 +711,7 @@ model: "sonnet"
 
 **Tool call 2** - Bash tool (run_in_background: true):
 ```bash
-gemini -p "Research: best practices for implementing rate limiting in Node.js APIs" -m gemini-3-pro -o json 2>/dev/null > /tmp/gemini.json
+gemini -p "Research: best practices for implementing rate limiting in Node.js APIs" -m "$bt_gemini_model" -o json 2>/dev/null > /tmp/gemini.json
 ```
 
 **Tool call 3** - Bash tool (run_in_background: true):
@@ -633,7 +774,7 @@ Then synthesize findings from all three sources.
 1. **Use Gemini for design & frontend** - Strong performance on UI challenges and design system analysis
 2. **Use Gemini for large context** - 1M tokens native vs 200K for Claude/Codex; can analyze 40K+ lines holistically
 3. **Cross-model review catches bugs** - When a model writes code, it's blind to its own mistakes; different models spot issues instantly
-4. **Use explicit models** - Headless defaults auto-route to weaker models; always specify `--model sonnet` or `-m gemini-3.1-pro`
+4. **Use the model probe** - Run the model discovery probe once per session; never hardcode Gemini model names
 5. **Parse JSON output** - Structured output enables scripting, automation, and synthesis
 6. **Parallel is fast** - Run all three simultaneously for 3x speed and diverse perspectives
 7. **Different models, different blind spots** - Each AI has different training; combined approaches outperform individuals

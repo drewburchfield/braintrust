@@ -23,11 +23,11 @@ This is not optional. The entire value of the braintrust is multi-model coverage
 2. **Gemini** (if `bt_gemini_available=true`): Use the Bash tool with `run_in_background: true`:
    ```bash
    source /tmp/bt_models.env 2>/dev/null || bt_gemini_model="gemini-2.5-pro"
-   gemini -p "$QUERY" -m "$bt_gemini_model" -o text 2>/dev/null
+   gemini -p "$QUERY" -m "$bt_gemini_model" --approval-mode yolo --sandbox=none -o text 2>/dev/null
    ```
 3. **Codex** (if `bt_codex_available=true`): Use the Bash tool with `run_in_background: true`:
    ```bash
-   codex exec --json --skip-git-repo-check "$QUERY" 2>/dev/null > /tmp/codex.json
+   codex exec --ephemeral -s read-only --json --skip-git-repo-check "$QUERY" 2>/dev/null > /tmp/codex.json
    ```
 
 > **Skip unavailable CLIs.** If the probe marked a CLI as unavailable, do not launch it. Note the gap in your synthesis instead.
@@ -88,8 +88,8 @@ This means **all three models are always available** regardless of which harness
 # Diagnostic health checks (only run if needed)
 # Note: Claude health check must run outside Claude Code (nested sessions blocked)
 source /tmp/bt_models.env 2>/dev/null || bt_gemini_fast="gemini-2.5-flash"
-gemini -p "say ok" -m "$bt_gemini_fast" -o text 2>/dev/null | grep -qi "ok" && echo "Gemini: OK" || echo "Gemini: FAILED"
-codex exec --json "test" 2>/dev/null | head -5 && echo "Codex: OK" || echo "Codex: FAILED"
+gemini -p "say ok" -m "$bt_gemini_fast" --approval-mode yolo --sandbox=none -o text 2>/dev/null | grep -qi "ok" && echo "Gemini: OK" || echo "Gemini: FAILED"
+codex exec --ephemeral -s read-only --json --skip-git-repo-check "test" 2>/dev/null | head -5 && echo "Codex: OK" || echo "Codex: FAILED"
 ```
 
 When running from Claude Code, Claude itself is always available via the Task tool. No health check needed.
@@ -115,6 +115,23 @@ If Codex fails, check these in order:
 
 **MCP server note:** Codex loads all configured MCP servers on every `exec` call. If you have heavy servers (Playwright, Docker, etc.) in `~/.codex/config.toml`, they add startup latency. For braintrust consultations, Codex doesn't need MCP servers since it's just answering a question.
 
+### Common Gemini Failure Modes
+
+If Gemini fails, check these in order:
+
+| Symptom | Cause | Fix |
+|---------|-------|-----|
+| Empty response (exit 0) | Upstream bug #24290: retry logic only applies to Gemini 2 models. 3.x models silently drop `InvalidStreamError`. | Retry once. If still empty, fall back to `gemini-2.5-pro`. |
+| 429 rate limit / `limit: 0` | Free-tier now restricted to Flash models. Pro models need a billing account linked in AI Studio. | Use `gemini-2.5-flash` or link billing at aistudio.google.com. |
+| Model 404 | Bare model names without `-preview` suffix on 3.x models. | Always use `-preview` suffix (e.g., `gemini-3.1-pro-preview`). |
+| Infinite retry / hung process | `gemini-3.1-pro-preview` capacity issues on some auth tiers (#23762). | The probe catches this via timeout. Add `timeout 120` to consultation calls. |
+| Exit code 53 | Turn limit exceeded (`maxSessionTurns` in `~/.gemini/settings.json`). | Increase `maxSessionTurns` or avoid `-o json` which triggers extra turns. |
+| Hangs waiting for tool approval | Model tries to use a tool in headless mode but can't get approval. | Always use `--approval-mode yolo` in headless calls. |
+| Slow startup | Extensions loading on every invocation. | The `--sandbox=none` flag helps. If still slow, consider `--extensions ""`. |
+| `FatalTurnLimitedError` with `-o json` | `-o json` triggers internal tool use that counts against turn limits. | Use `-o text` instead (already our default). |
+
+**Free-tier note:** As of March 2026, Google OAuth free-tier users only get Flash-level models. Pro models require either a Google One AI Pro subscription with billing linked, or an explicit `GEMINI_API_KEY` with billing enabled. The probe will fall back to `gemini-2.5-pro` (stable) automatically.
+
 ## Braintrust Defaults
 
 **Always use explicit capable models.** CLI headless modes auto-route to weaker models when called without specifying a model. Start with the best model and fall back if it fails.
@@ -124,7 +141,24 @@ If Codex fails, check these in order:
 | **Claude** (from Claude Code) | Task tool with `subagent_type: "general-purpose"` | Task tool with `model: "haiku"` |
 | **Claude** (from other CLIs) | `claude -p "query" --model sonnet --output-format json` | `--model haiku` |
 | **Gemini** | Uses `$bt_gemini_model` from model probe (see below) | Uses `$bt_gemini_fast` from model probe |
-| **Codex** | `codex exec --json --skip-git-repo-check "query" 2>/dev/null` | N/A |
+| **Codex** | `codex exec --ephemeral -s read-only --json --skip-git-repo-check "query" 2>/dev/null` | N/A |
+
+### Gemini Standard Flags
+
+**Every headless Gemini call must include these flags.** They prevent silent hangs and unnecessary overhead:
+
+```bash
+gemini -p "$QUERY" -m "$bt_gemini_model" --approval-mode yolo --sandbox=none -o text 2>/dev/null
+```
+
+| Flag | Why |
+|------|-----|
+| `--approval-mode yolo` | Prevents Gemini from hanging when it wants to use a tool and waits for approval that never comes in headless mode |
+| `--sandbox=none` | Skips sandbox initialization overhead. Braintrust queries are read-only consultations, no sandboxing needed. |
+| `-o text` | Avoids `FatalTurnLimitedError` with `-o json` when `maxSessionTurns: 1`. Text needs no parsing. |
+| `2>/dev/null` | Suppresses extension/MCP loading noise on stderr |
+
+All Gemini examples in this file assume these flags. When you see a short example like `gemini -p "query" -m "$bt_gemini_model" -o text 2>/dev/null`, always add `--approval-mode yolo --sandbox=none` in the actual command.
 
 ### Model Discovery (Run Once Per Session)
 
@@ -154,12 +188,14 @@ bt_gemini_fast=""
 bt_gemini_available="false"
 if command -v gemini &>/dev/null; then
   gemini_probe() {
-    run_with_timeout 15 gemini -p "say ok" -m "$1" -o text 2>/dev/null | grep -qi "ok"
+    run_with_timeout 20 gemini -p "say ok" -m "$1" --approval-mode yolo --sandbox=none -o text 2>/dev/null | grep -qi "ok"
   }
-  for m in "gemini-3.1-pro-preview" "gemini-2.5-pro"; do
+  # Order: gemini-2.5-pro first (stable), then 3.1-pro-preview (flaky: upstream bug #24290
+  # causes empty responses, and availability is inconsistent with 429s on many auth tiers)
+  for m in "gemini-2.5-pro" "gemini-3.1-pro-preview"; do
     if gemini_probe "$m"; then bt_gemini_model="$m"; break; fi
   done
-  for m in "gemini-3-flash-preview" "gemini-2.5-flash"; do
+  for m in "gemini-2.5-flash" "gemini-3-flash-preview"; do
     if gemini_probe "$m"; then bt_gemini_fast="$m"; break; fi
   done
   if [ -n "$bt_gemini_model" ]; then
@@ -175,7 +211,7 @@ fi
 # --- Codex ---
 bt_codex_available="false"
 if command -v codex &>/dev/null; then
-  codex_result=$(run_with_timeout 30 codex exec --json --skip-git-repo-check "Say ok" 2>/dev/null | jq -rs 'map(select(.item.type? == "agent_message")) | last | .item.text' 2>/dev/null)
+  codex_result=$(run_with_timeout 30 codex exec --ephemeral -s read-only --json --skip-git-repo-check "Say ok" 2>/dev/null | jq -rs 'map(select(.item.type? == "agent_message")) | last | .item.text' 2>/dev/null)
   if [ -n "$codex_result" ] && [ "$codex_result" != "null" ]; then
     bt_codex_available="true"
     echo "Codex: available"
@@ -223,17 +259,28 @@ source /tmp/bt_models.env 2>/dev/null || bt_gemini_model="gemini-2.5-pro"
 Even after the probe, a model can fail mid-consultation (quota, rate limit, transient error). Wrap every CLI call to detect and report failures:
 
 ```bash
-# Gemini with error detection
+# Gemini with error detection and retry
 source /tmp/bt_models.env 2>/dev/null || bt_gemini_model="gemini-2.5-pro"
-gemini_response=$(gemini -p "$QUERY" -m "$bt_gemini_model" -o text 2>/dev/null)
-if [ -z "$gemini_response" ]; then
-  echo "GEMINI_FAILED: empty response (check model availability or rate limits)"
+gemini_response=$(timeout 120 gemini -p "$QUERY" -m "$bt_gemini_model" --approval-mode yolo --sandbox=none -o text 2>/dev/null)
+gemini_exit=$?
+if [ $gemini_exit -eq 124 ]; then
+  echo "GEMINI_FAILED: timed out after 120s"
+elif [ $gemini_exit -eq 53 ]; then
+  echo "GEMINI_FAILED: turn limit exceeded (check maxSessionTurns in ~/.gemini/settings.json)"
+elif [ -z "$gemini_response" ]; then
+  # Retry once: gemini-3.x has an upstream bug (#24290) where empty responses happen intermittently
+  gemini_response=$(timeout 120 gemini -p "$QUERY" -m "$bt_gemini_model" --approval-mode yolo --sandbox=none -o text 2>/dev/null)
+  if [ -z "$gemini_response" ]; then
+    echo "GEMINI_FAILED: empty response after retry (check model availability or rate limits)"
+  else
+    echo "$gemini_response"
+  fi
 else
   echo "$gemini_response"
 fi
 
 # Codex with error detection (CRITICAL: always redirect stderr to avoid blank output)
-codex exec --json --skip-git-repo-check "$QUERY" 2>/dev/null > /tmp/codex.json
+codex exec --ephemeral -s read-only --json --skip-git-repo-check "$QUERY" 2>/dev/null > /tmp/codex.json
 codex_response=$(jq -rs 'map(select(.item.type? == "agent_message")) | last | .item.text' /tmp/codex.json 2>/dev/null)
 if [ -z "$codex_response" ] || [ "$codex_response" = "null" ]; then
   echo "CODEX_FAILED: empty or unparseable response"
@@ -251,11 +298,63 @@ If a model returns an error (404, quota, etc.), fall back to the next model in t
 | CLI | Primary | Fallback 1 | Fallback 2 |
 |-----|---------|------------|------------|
 | **Claude** | `opus` | `sonnet` | `haiku` |
-| **Gemini** | `gemini-3.1-pro-preview` | `gemini-2.5-pro` | N/A |
-| **Gemini (fast)** | `gemini-3-flash-preview` | `gemini-2.5-flash` | N/A |
+| **Gemini** | `gemini-2.5-pro` (stable) | `gemini-3.1-pro-preview` (flaky) | N/A |
+| **Gemini (fast)** | `gemini-2.5-flash` (stable) | `gemini-3-flash-preview` | N/A |
 | **Codex** | (default, currently gpt-5.4) | N/A | N/A |
 
 > **Gemini model naming:** All 3.x models require `-preview` suffix. Bare names return 404. The 3.1 generation has Pro and Flash Lite only (no regular Flash). The best fast model is `gemini-3-flash-preview` (3.0 generation). The probe handles fallbacks automatically.
+
+### Codex Model Aliases
+
+When the user requests a model by shorthand, map it before passing to `--model`:
+
+| Alias | Resolves To | Auth Required | Notes |
+|-------|-------------|---------------|-------|
+| `spark` | `gpt-5.3-codex-spark` | ChatGPT Pro or API key | Research preview, fast |
+| `mini` | `gpt-5.4-mini` | ChatGPT Plus/Pro or API key | 70% cheaper, good for simple lookups |
+
+Leave `--model` unset by default (uses gpt-5.4). Only add it when the user explicitly requests a model or when the task is a trivial lookup (use `mini`).
+
+> **Auth note:** Model selection with `--model` works with both ChatGPT subscription auth and API key auth. However, not all models are available on all subscription tiers. If a model returns an auth or availability error, fall back to the default (gpt-5.4).
+
+### Codex Sandbox Modes
+
+All braintrust Codex calls default to `--ephemeral -s read-only` because consultations don't need to persist sessions or write files.
+
+| Mode | Flag | When to Use |
+|------|------|-------------|
+| **Read-only** (default) | `-s read-only` | Questions, research, reviews, second opinions |
+| **Write** | `-s workspace-write` | Only when the user explicitly asks Codex to make changes |
+| **Full access** | `-s danger-full-access` | Never use in braintrust consultations |
+
+### Codex Code Review
+
+For code review specifically, use the dedicated `codex exec review` subcommand instead of crafting a review prompt. It auto-reads git diffs:
+
+```bash
+# Review uncommitted changes (staged + unstaged diffs only)
+codex exec review --uncommitted
+
+# Review branch against base
+codex exec review --base main
+
+# Review a specific commit
+codex exec review --commit <SHA>
+```
+
+These are read-only by design. The output is plain text (not JSONL), so no `jq` parsing needed.
+
+> **Limitation:** `exec review --uncommitted` only sees tracked file diffs. Brand-new untracked files are invisible to it. If the user has new files, either stage them first (`git add`) or use a standard consultation prompt that includes the file contents instead.
+
+## Handling Braintrust Results
+
+**Never auto-fix review findings.** After presenting review output from any model, STOP. Do not make code changes. Do not fix issues. Ask the user which findings, if any, they want addressed. This applies to all models (Claude subagent, Gemini, Codex).
+
+Auto-applying suggestions defeats the purpose of a second opinion. The user should evaluate the findings and decide what to act on.
+
+**Preserve evidence boundaries.** If a model marked something as an inference, uncertainty, or hypothesis, keep that distinction when presenting findings. Do not upgrade guesses to facts.
+
+**If Codex returns structured JSON** (from `--output-schema`), present the parsed structure. If it returns malformed output or fails, show the relevant stderr and stop. Do not fabricate a substitute answer.
 
 ## When to Consult the Braintrust
 
@@ -298,10 +397,10 @@ Get a second opinion from the braintrust. **Always source the model probe first:
 ```bash
 # Consult Gemini (via Bash tool) - uses probed model
 source /tmp/bt_models.env 2>/dev/null || bt_gemini_model="gemini-2.5-pro"
-gemini -p "Review this implementation approach: [CONTEXT]" -m "$bt_gemini_model" -o text 2>/dev/null
+timeout 120 gemini -p "Review this implementation approach: [CONTEXT]" -m "$bt_gemini_model" --approval-mode yolo --sandbox=none -o text 2>/dev/null
 
 # Consult Codex (via Bash tool)
-codex exec --json --skip-git-repo-check "Review this implementation approach: [CONTEXT]" 2>/dev/null | jq -rs 'map(select(.item.type? == "agent_message")) | last | .item.text'
+codex exec --ephemeral -s read-only --json --skip-git-repo-check "Review this implementation approach: [CONTEXT]" 2>/dev/null | jq -rs 'map(select(.item.type? == "agent_message")) | last | .item.text'
 
 # Consult Claude (via Task tool, NOT bash)
 # Use Task tool with subagent_type: "general-purpose" and the query as the prompt
@@ -380,7 +479,7 @@ claude -p "[QUERY]" --model haiku --output-format json
 
 # Gemini Flash
 source /tmp/bt_models.env 2>/dev/null || bt_gemini_fast="gemini-2.5-flash"
-gemini -p "[QUERY]" -m "$bt_gemini_fast" -o text 2>/dev/null
+gemini -p "[QUERY]" -m "$bt_gemini_fast" --approval-mode yolo --sandbox=none -o text 2>/dev/null
 ```
 
 ### Parallel Research (from Claude Code)
@@ -397,12 +496,12 @@ model: "sonnet"
 **Tool call 2** - Bash tool (run_in_background: true):
 ```bash
 source /tmp/bt_models.env 2>/dev/null || bt_gemini_model="gemini-2.5-pro"
-gemini -p "Research: $TOPIC" -m "$bt_gemini_model" -o text 2>/dev/null > /tmp/gemini.txt
+timeout 120 gemini -p "Research: $TOPIC" -m "$bt_gemini_model" --approval-mode yolo --sandbox=none -o text 2>/dev/null > /tmp/gemini.txt
 ```
 
 **Tool call 3** - Bash tool (run_in_background: true):
 ```bash
-codex exec --json --skip-git-repo-check "Research: $TOPIC" 2>/dev/null > /tmp/codex.json
+codex exec --ephemeral -s read-only --json --skip-git-repo-check "Research: $TOPIC" 2>/dev/null > /tmp/codex.json
 ```
 
 Then read the results:
@@ -487,6 +586,116 @@ IMPORTANT: After your analysis, include a 'Self-Critique' section with 2-3 bulle
 
 **Note:** The self-critique suffix is baked into the template. Don't add it separately - it's already included above.
 
+## Codex Prompt Structure: XML Blocks
+
+**For Codex specifically**, use XML-tagged prompt blocks instead of plain text. GPT-5.4 responds better to block-structured prompts with explicit contracts. This does not apply to Gemini or Claude queries.
+
+### Core Blocks
+
+Always include `<task>`:
+
+```xml
+<task>
+[Concrete job description, relevant context, expected end state]
+</task>
+```
+
+Add an output contract when the response shape matters:
+
+```xml
+<structured_output_contract>
+Return:
+1. [first required section]
+2. [second required section]
+3. [third required section]
+Keep the answer compact. Put highest-value findings first.
+</structured_output_contract>
+```
+
+Or for concise prose instead of structured output:
+
+```xml
+<compact_output_contract>
+Keep the final answer compact and structured.
+Do not include long scene-setting or repeated recap.
+</compact_output_contract>
+```
+
+### Verification and Grounding Blocks
+
+Add these selectively based on task type:
+
+```xml
+<!-- For debugging, implementation, or risky fixes -->
+<verification_loop>
+Before finalizing, verify the result against the task requirements and the changed files or tool outputs.
+If a check fails, revise the answer instead of reporting the first draft.
+</verification_loop>
+
+<!-- For review, research, or root-cause analysis -->
+<grounding_rules>
+Ground every claim in the provided context or your tool outputs.
+Do not present inferences as facts. If a point is a hypothesis, label it clearly.
+</grounding_rules>
+
+<!-- When Codex might otherwise guess missing info -->
+<missing_context_gating>
+Do not guess missing repository facts.
+If required context is absent, state exactly what remains unknown.
+</missing_context_gating>
+
+<!-- For write-capable tasks to prevent scope creep -->
+<action_safety>
+Keep changes tightly scoped to the stated task.
+Avoid unrelated refactors, renames, or cleanup unless required for correctness.
+</action_safety>
+```
+
+### When to Use Which Blocks
+
+| Task Type | Required Blocks |
+|-----------|----------------|
+| **Code review** | `task` + `grounding_rules` + `structured_output_contract` |
+| **Debugging** | `task` + `verification_loop` + `missing_context_gating` |
+| **Research** | `task` + `grounding_rules` + `compact_output_contract` |
+| **Implementation** | `task` + `verification_loop` + `action_safety` |
+
+### Anti-Patterns
+
+- **Vague framing.** "Take a look at this and let me know" produces vague output. State the concrete job.
+- **Missing output contract.** "Investigate and report back" gives unpredictable structure. Specify what sections you want.
+- **"Think harder" instead of better contracts.** Don't raise reasoning effort first. Tighten the prompt structure and add verification rules before escalating.
+- **Mixing unrelated jobs.** One task per Codex run. Split unrelated asks into separate invocations.
+
+### Example: Code Review Query to Codex
+
+```bash
+REVIEW_PROMPT='<task>
+Review the authentication middleware for correctness and security issues.
+Focus on session handling, token validation, and authorization checks.
+</task>
+
+<structured_output_contract>
+Return:
+1. Findings ordered by severity (critical, high, medium)
+2. Supporting evidence for each finding (file, line, code snippet)
+3. Concrete fix recommendation per finding
+4. Brief summary of what looks correct
+</structured_output_contract>
+
+<grounding_rules>
+Ground every claim in the repository context.
+If a point is an inference, label it clearly.
+</grounding_rules>
+
+<verification_loop>
+Before finalizing, verify each finding is material and actionable.
+Prefer one strong finding over several weak ones.
+</verification_loop>'
+
+codex exec --ephemeral -s read-only --json --skip-git-repo-check "$REVIEW_PROMPT" 2>/dev/null > /tmp/codex.json
+```
+
 ## Saving Consultation Sessions
 
 After synthesizing, save a session file to `.braintrust/sessions/` for future reference. Create the directory if it doesn't exist (`mkdir -p .braintrust/sessions`).
@@ -526,16 +735,18 @@ Use this format to document the full consultation for future reference:
 | **Opus 4.6** | `opus` | 200K | Hardest reasoning problems |
 | **Haiku 4.5** | `haiku` | 200K | Speed, cost efficiency |
 
-### Gemini (as of March 2026)
+### Gemini (as of April 2026)
 
 | Model | Flag Value | Context | Status |
 |-------|-----------|---------|--------|
-| **Gemini 3.1 Pro** | `gemini-3.1-pro-preview` | 1M | Preview, flagship. Capacity-limited (429s common). |
-| **Gemini 3 Flash** | `gemini-3-flash-preview` | 1M | Preview, fast. Reliable. |
+| **Gemini 2.5 Pro** | `gemini-2.5-pro` | 1M | **Stable, recommended default.** Probe tries this first. |
+| **Gemini 2.5 Flash** | `gemini-2.5-flash` | 1M | **Stable, recommended fast default.** |
+| **Gemini 3.1 Pro** | `gemini-3.1-pro-preview` | 1M | Preview. Flaky: empty responses (#24290), 429s, retry loops (#23762). Probe fallback only. |
+| **Gemini 3 Flash** | `gemini-3-flash-preview` | 1M | Preview, fast. More reliable than 3.1 Pro but still preview. |
 | **Gemini 3.1 Flash Lite** | `gemini-3.1-flash-lite-preview` | 1M | Preview, cost-efficient |
-| **Gemini 2.5 Pro** | `gemini-2.5-pro` | 1M | Stable, reliable fallback |
-| **Gemini 2.5 Flash** | `gemini-2.5-flash` | 1M | Stable, fast fallback |
 
+> **Why 2.5 before 3.x?** Gemini 3.x models have an upstream bug (#24290) where the InvalidStreamError retry logic only applies to Gemini 2 models. On 3.x, empty responses happen intermittently and are not retried. Combined with capacity limits (429s) and auth-tier restrictions, 2.5-pro is more reliable for automated consultations. The probe will still discover and use 3.x if it responds successfully.
+>
 > **Deprecated:** `gemini-3-pro-preview` was shut down March 9, 2026. Use `gemini-3.1-pro-preview` instead.
 >
 > **No "3.1 Flash":** The 3.1 generation has Pro and Flash Lite, but no regular Flash. The best fast model remains `gemini-3-flash-preview` (3.0 generation).
@@ -545,6 +756,8 @@ Use this format to document the full consultation for future reference:
 > **Naming pattern:** All 3.x models require `-preview` suffix. Bare names (e.g., `gemini-3-pro`) return 404.
 >
 > **Output format:** Use `-o text` for headless mode. `-o json` triggers internal tool use which fails if `maxSessionTurns` is set to 1 in `~/.gemini/settings.json`.
+>
+> **Free-tier restriction:** As of March 2026, free-tier Google OAuth only gets Flash-level models. Pro models require a billing account linked in AI Studio or a `GEMINI_API_KEY`.
 
 ### Codex (as of March 2026)
 
@@ -553,7 +766,7 @@ Use this format to document the full consultation for future reference:
 | **GPT-5.4** | (default) | 192K | ChatGPT auth (Plus/Pro/Team/Enterprise) |
 | **GPT-5.3 Codex** | `gpt-5.3-codex` | 192K | Previous default |
 | **GPT-5.3 Codex Spark** | `gpt-5.3-codex-spark` | varies | ChatGPT Pro only (research preview) |
-| Custom | `-m model-name` | varies | API key auth (`CODEX_API_KEY`) |
+| Custom | `-m model-name` | varies | Any auth method |
 
 ## Output Parsing
 
@@ -576,13 +789,13 @@ With `-o text`, Gemini returns plain text directly to stdout. No JSON parsing ne
 
 ```bash
 # Direct usage - response prints to stdout
-gemini -p "your query" -m "$bt_gemini_model" -o text 2>/dev/null
+gemini -p "your query" -m "$bt_gemini_model" --approval-mode yolo --sandbox=none -o text 2>/dev/null
 
 # Capture to variable
-gemini_response=$(gemini -p "your query" -m "$bt_gemini_model" -o text 2>/dev/null)
+gemini_response=$(timeout 120 gemini -p "your query" -m "$bt_gemini_model" --approval-mode yolo --sandbox=none -o text 2>/dev/null)
 
 # Save to file for later reading
-gemini -p "your query" -m "$bt_gemini_model" -o text 2>/dev/null > /tmp/gemini.txt
+timeout 120 gemini -p "your query" -m "$bt_gemini_model" --approval-mode yolo --sandbox=none -o text 2>/dev/null > /tmp/gemini.txt
 ```
 
 > **Why `-o text` instead of `-o json`?** `-o json` triggers internal tool use, which counts against `maxSessionTurns` in `~/.gemini/settings.json`. With `maxSessionTurns: 1` (a common headless setting), `-o json` fails with `FatalTurnLimitedError`. `-o text` avoids this entirely.
@@ -602,7 +815,7 @@ Parse with: `jq -rs 'map(select(.item.type? == "agent_message")) | last | .item.
 
 **Alternative:** Use `--output-schema` for structured responses or `-o path` to write the final message to a file:
 ```bash
-codex exec --json --skip-git-repo-check "query" -o /tmp/codex-result.txt
+codex exec --ephemeral -s read-only --json --skip-git-repo-check "query" -o /tmp/codex-result.txt
 ```
 
 ## Common Use Cases
@@ -667,7 +880,7 @@ gemini -p "@src/ Review this codebase for security vulnerabilities:
 3. XSS vulnerabilities
 4. CSRF protection
 5. Secrets in code
-6. Rate limiting gaps" -m "$bt_gemini_model" -o text 2>/dev/null > /tmp/gemini-security.txt
+6. Rate limiting gaps" -m "$bt_gemini_model" --approval-mode yolo --sandbox=none -o text 2>/dev/null > /tmp/gemini-security.txt
 ```
 
 **Tool call 3** - Bash tool (run_in_background: true):
@@ -679,7 +892,7 @@ AUDIT_PROMPT="Review this codebase for security vulnerabilities:
 4. CSRF protection
 5. Secrets in code
 6. Rate limiting gaps"
-codex exec --json --skip-git-repo-check "$AUDIT_PROMPT" 2>/dev/null > /tmp/codex-security.json
+codex exec --ephemeral -s read-only --json --skip-git-repo-check "$AUDIT_PROMPT" 2>/dev/null > /tmp/codex-security.json
 ```
 
 Then collect and compare findings from all three.
@@ -724,12 +937,12 @@ model: "sonnet"
 
 **Tool call 2** - Bash tool (run_in_background: true):
 ```bash
-gemini -p "Research: best practices for implementing rate limiting in Node.js APIs" -m "$bt_gemini_model" -o text 2>/dev/null > /tmp/gemini.txt
+timeout 120 gemini -p "Research: best practices for implementing rate limiting in Node.js APIs" -m "$bt_gemini_model" --approval-mode yolo --sandbox=none -o text 2>/dev/null > /tmp/gemini.txt
 ```
 
 **Tool call 3** - Bash tool (run_in_background: true):
 ```bash
-codex exec --json --skip-git-repo-check "Research: best practices for implementing rate limiting in Node.js APIs" 2>/dev/null > /tmp/codex.json
+codex exec --ephemeral -s read-only --json --skip-git-repo-check "Research: best practices for implementing rate limiting in Node.js APIs" 2>/dev/null > /tmp/codex.json
 ```
 
 Then synthesize findings from all three sources.
@@ -758,31 +971,34 @@ Then synthesize findings from all three sources.
 | Flag | Purpose |
 |------|---------|
 | `-p, --prompt` | Non-interactive (headless) mode (**required** for headless) |
-| `-m, --model` | Model selection |
-| `-o, --output-format` | **Use `text`** for headless. `json` triggers tool use and breaks with `maxSessionTurns: 1`. |
+| `-m, --model` | Model selection (also supports aliases: `pro`, `flash`, `flash-lite`, `auto`) |
+| `-o, --output-format` | **Use `text`** for headless. `json` triggers tool use and breaks with `maxSessionTurns: 1`. `stream-json` returns JSONL events. |
+| `--approval-mode` | **Use `yolo`** for headless. Prevents tool-approval hangs. Replaces deprecated `-y/--yolo`. |
+| `--sandbox` | Sandbox mode. **Use `none`** for braintrust queries. Options: none/docker/podman/sandbox-exec/runsc/lxc. |
 | `@path` | Include file/directory in context |
 | `-a, --all-files` | Include all repo files in context (no `@` needed) |
 | `--include-directories` | Additional directories for context |
-| `-y, --yolo` | Auto-approve all actions |
-| `--approval-mode` | Granular approval: default/auto_edit/yolo/plan |
+| `--extensions` | Control extension loading. Use `""` to skip all extensions for faster startup. |
 | `--policy` | User-defined tool/action policies (replaces deprecated `--allowed-tools`) |
 | `--raw-output` | Disable output sanitization (allows ANSI escapes) |
-| `-r, --resume` | Resume previous session (`latest` or index number) |
+| `-r, --resume` | Resume previous session (`latest` or session ID) |
 | `-d, --debug` | Enable debug output for diagnosing failures |
 
 > **Positional args run interactive mode.** Always use `-p` for headless/scripted usage.
 >
-> **Free tier limits (Google OAuth):** 60 requests/minute, 1,000 requests/day. For heavy braintrust usage, consider an API key (`GEMINI_API_KEY`) or Vertex AI auth.
+> **Free tier limits (Google OAuth):** Free tier is now restricted to Flash-level models only. Pro models require a billing account linked in AI Studio or an API key (`GEMINI_API_KEY`) with billing enabled.
+>
+> **Exit codes:** `0` success, `1` general error, `42` input error, `53` turn limit exceeded.
 
 ### Codex
 | Flag | Purpose |
 |------|---------|
 | `exec` | Non-interactive subcommand (alias: `e`) |
-| `exec review` | Non-interactive code review (`--uncommitted`, `--base <BRANCH>`, `--commit <SHA>`) |
+| `exec review` | Dedicated code review (`--uncommitted`, `--base <BRANCH>`, `--commit <SHA>`). Auto-reads diffs. Plain text output. |
 | `--json` | JSONL output stream |
 | `--full-auto` | Low-friction preset: workspace-write + on-request approvals |
 | `-s, --sandbox` | Sandbox policy: read-only/workspace-write/danger-full-access |
-| `-m, --model` | Model selection (API key auth only) |
+| `-m, --model` | Model selection (works with ChatGPT auth and API key) |
 | `--oss` | Use open-source provider (LM Studio or Ollama) |
 | `--local-provider` | Specify local provider: lmstudio/ollama (with `--oss`) |
 | `-i, --image` | Attach images for visual context (repeatable, comma-separated) |
@@ -806,6 +1022,9 @@ Then synthesize findings from all three sources.
 7. **Different models, different blind spots** - Each AI has different training; combined approaches outperform individuals
 8. **Always redirect Gemini stderr** - Use `2>/dev/null` to suppress extension warnings and MCP noise
 9. **Never run `claude -p` from Claude Code** - It will fail. Use the Task tool for the Claude leg of any consultation
+10. **Use `codex exec review` for code review** - The dedicated review subcommand auto-reads git diffs; no need to craft review prompts manually
+11. **Always use `--ephemeral -s read-only` for Codex** - Braintrust consultations are stateless and read-only. Only switch to `-s workspace-write` when the user explicitly asks Codex to make changes.
+12. **Never auto-fix review findings** - Present findings and let the user decide what to act on
 
 ## Further Reading
 

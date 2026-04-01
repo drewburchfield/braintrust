@@ -17,14 +17,22 @@ Delegates tasks to other AI CLIs (Gemini, Codex, Claude Code) running in paralle
 | Command | What it does |
 |---------|-------------|
 | `/braintrust` | Orchestrate a task across multiple AI CLIs |
+| `/consult` | Alias for `/braintrust` |
 
 ## Use Cases
 
 - Offload grunt work to Gemini (1M context window)
 - Get second opinions from different models
-- Design review with WebDev Arena leader
+- Cross-model code review (Codex `exec review` or parallel all three)
 - Validate architecture decisions
 - Parallel research across multiple models
+- Security audits with diverse model perspectives
+
+## v1.5.0 Highlights
+
+- **Codex**: stateless consultations (`--ephemeral -s read-only`), XML-structured prompts for better output, dedicated `codex exec review` for code review, model aliases (`spark`, `mini`)
+- **Gemini**: headless reliability (`--approval-mode yolo --sandbox=none`), timeouts on all calls, retry on empty response, stable model defaults (2.5-pro over flaky 3.1-pro-preview)
+- **Results discipline**: review findings are presented, never auto-applied
 
 ## Requirements
 

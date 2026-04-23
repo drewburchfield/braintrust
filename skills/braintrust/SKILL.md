@@ -27,8 +27,10 @@ This is not optional. The entire value of the braintrust is multi-model coverage
    ```
 3. **Codex** (if `bt_codex_available=true`): Use the Bash tool with `run_in_background: true`:
    ```bash
-   codex exec --ephemeral -s read-only --json --skip-git-repo-check "$QUERY" 2>/dev/null > /tmp/codex.json
+   codex exec --ephemeral -s read-only --json --skip-git-repo-check "$QUERY" < /dev/null 2>/dev/null > /tmp/codex.json
    ```
+
+   > **Always include `< /dev/null`.** Codex's `exec "prompt"` reads stdin by default and hangs forever when the harness pipes to it. This is the single most common reason Codex appears broken. See "Common Codex Failure Modes" below.
 
 > **Skip unavailable CLIs.** If the probe marked a CLI as unavailable, do not launch it. Note the gap in your synthesis instead.
 
@@ -89,7 +91,7 @@ This means **all three models are always available** regardless of which harness
 # Note: Claude health check must run outside Claude Code (nested sessions blocked)
 source /tmp/bt_models.env 2>/dev/null || bt_gemini_fast="gemini-2.5-flash"
 gemini -p "say ok" -m "$bt_gemini_fast" --approval-mode yolo --sandbox=none -o text 2>/dev/null | grep -qi "ok" && echo "Gemini: OK" || echo "Gemini: FAILED"
-codex exec --ephemeral -s read-only --json --skip-git-repo-check "test" 2>/dev/null | head -5 && echo "Codex: OK" || echo "Codex: FAILED"
+codex exec --ephemeral -s read-only --json --skip-git-repo-check "test" < /dev/null 2>/dev/null | head -5 && echo "Codex: OK" || echo "Codex: FAILED"
 ```
 
 When running from Claude Code, Claude itself is always available via the Task tool. No health check needed.
@@ -112,6 +114,7 @@ If Codex fails, check these in order:
 | Hangs on startup | MCP servers in `~/.codex/config.toml` failing to initialize | Check `[mcp_servers]` section. Servers with `required = true` cause immediate exit. Remove or fix broken servers. |
 | `not a git repository` | Codex requires a git repo by default | Add `--skip-git-repo-check` to exec commands |
 | `missing YAML frontmatter` (stderr) | Codex loading incompatible skill files | Non-blocking stderr noise. Safe to ignore. |
+| Hangs forever with `Reading additional input from stdin...` | Codex `exec "prompt"` reads stdin by default. If the harness pipes anything to stdin (or leaves it open), Codex waits or appends it as a `<stdin>` block. | **Always close stdin with `< /dev/null`.** Example: `codex exec --ephemeral -s read-only --json --skip-git-repo-check "$QUERY" < /dev/null 2>/dev/null`. This is the #1 cause of Codex appearing "broken" inside Claude Code. |
 
 **MCP server note:** Codex loads all configured MCP servers on every `exec` call. If you have heavy servers (Playwright, Docker, etc.) in `~/.codex/config.toml`, they add startup latency. For braintrust consultations, Codex doesn't need MCP servers since it's just answering a question.
 
@@ -141,7 +144,7 @@ If Gemini fails, check these in order:
 | **Claude** (from Claude Code) | Task tool with `subagent_type: "general-purpose"` | Task tool with `model: "haiku"` |
 | **Claude** (from other CLIs) | `claude -p "query" --model sonnet --output-format json` | `--model haiku` |
 | **Gemini** | Uses `$bt_gemini_model` from model probe (see below) | Uses `$bt_gemini_fast` from model probe |
-| **Codex** | `codex exec --ephemeral -s read-only --json --skip-git-repo-check "query" 2>/dev/null` | N/A |
+| **Codex** | `codex exec --ephemeral -s read-only --json --skip-git-repo-check "query" < /dev/null 2>/dev/null` | N/A |
 
 ### Gemini Standard Flags
 
@@ -211,7 +214,7 @@ fi
 # --- Codex ---
 bt_codex_available="false"
 if command -v codex &>/dev/null; then
-  codex_result=$(run_with_timeout 30 codex exec --ephemeral -s read-only --json --skip-git-repo-check "Say ok" 2>/dev/null | jq -rs 'map(select(.item.type? == "agent_message")) | last | .item.text' 2>/dev/null)
+  codex_result=$(run_with_timeout 30 codex exec --ephemeral -s read-only --json --skip-git-repo-check "Say ok" < /dev/null 2>/dev/null | jq -rs 'map(select(.item.type? == "agent_message")) | last | .item.text' 2>/dev/null)
   if [ -n "$codex_result" ] && [ "$codex_result" != "null" ]; then
     bt_codex_available="true"
     echo "Codex: available"
@@ -279,8 +282,10 @@ else
   echo "$gemini_response"
 fi
 
-# Codex with error detection (CRITICAL: always redirect stderr to avoid blank output)
-codex exec --ephemeral -s read-only --json --skip-git-repo-check "$QUERY" 2>/dev/null > /tmp/codex.json
+# Codex with error detection (CRITICAL: always close stdin AND redirect stderr)
+# - `< /dev/null` prevents stdin hang (Codex reads stdin even when a prompt arg is passed)
+# - `2>/dev/null` prevents stderr noise from corrupting the JSONL stream
+codex exec --ephemeral -s read-only --json --skip-git-repo-check "$QUERY" < /dev/null 2>/dev/null > /tmp/codex.json
 codex_response=$(jq -rs 'map(select(.item.type? == "agent_message")) | last | .item.text' /tmp/codex.json 2>/dev/null)
 if [ -z "$codex_response" ] || [ "$codex_response" = "null" ]; then
   echo "CODEX_FAILED: empty or unparseable response"
@@ -400,7 +405,7 @@ source /tmp/bt_models.env 2>/dev/null || bt_gemini_model="gemini-2.5-pro"
 timeout 120 gemini -p "Review this implementation approach: [CONTEXT]" -m "$bt_gemini_model" --approval-mode yolo --sandbox=none -o text 2>/dev/null
 
 # Consult Codex (via Bash tool)
-codex exec --ephemeral -s read-only --json --skip-git-repo-check "Review this implementation approach: [CONTEXT]" 2>/dev/null | jq -rs 'map(select(.item.type? == "agent_message")) | last | .item.text'
+codex exec --ephemeral -s read-only --json --skip-git-repo-check "Review this implementation approach: [CONTEXT]" < /dev/null 2>/dev/null | jq -rs 'map(select(.item.type? == "agent_message")) | last | .item.text'
 
 # Consult Claude (via Task tool, NOT bash)
 # Use Task tool with subagent_type: "general-purpose" and the query as the prompt
@@ -501,7 +506,7 @@ timeout 120 gemini -p "Research: $TOPIC" -m "$bt_gemini_model" --approval-mode y
 
 **Tool call 3** - Bash tool (run_in_background: true):
 ```bash
-codex exec --ephemeral -s read-only --json --skip-git-repo-check "Research: $TOPIC" 2>/dev/null > /tmp/codex.json
+codex exec --ephemeral -s read-only --json --skip-git-repo-check "Research: $TOPIC" < /dev/null 2>/dev/null > /tmp/codex.json
 ```
 
 Then read the results:
@@ -693,7 +698,7 @@ Before finalizing, verify each finding is material and actionable.
 Prefer one strong finding over several weak ones.
 </verification_loop>'
 
-codex exec --ephemeral -s read-only --json --skip-git-repo-check "$REVIEW_PROMPT" 2>/dev/null > /tmp/codex.json
+codex exec --ephemeral -s read-only --json --skip-git-repo-check "$REVIEW_PROMPT" < /dev/null 2>/dev/null > /tmp/codex.json
 ```
 
 ## Saving Consultation Sessions
@@ -815,7 +820,7 @@ Parse with: `jq -rs 'map(select(.item.type? == "agent_message")) | last | .item.
 
 **Alternative:** Use `--output-schema` for structured responses or `-o path` to write the final message to a file:
 ```bash
-codex exec --ephemeral -s read-only --json --skip-git-repo-check "query" -o /tmp/codex-result.txt
+codex exec --ephemeral -s read-only --json --skip-git-repo-check "query" -o /tmp/codex-result.txt < /dev/null
 ```
 
 ## Common Use Cases
@@ -892,7 +897,7 @@ AUDIT_PROMPT="Review this codebase for security vulnerabilities:
 4. CSRF protection
 5. Secrets in code
 6. Rate limiting gaps"
-codex exec --ephemeral -s read-only --json --skip-git-repo-check "$AUDIT_PROMPT" 2>/dev/null > /tmp/codex-security.json
+codex exec --ephemeral -s read-only --json --skip-git-repo-check "$AUDIT_PROMPT" < /dev/null 2>/dev/null > /tmp/codex-security.json
 ```
 
 Then collect and compare findings from all three.
@@ -942,7 +947,7 @@ timeout 120 gemini -p "Research: best practices for implementing rate limiting i
 
 **Tool call 3** - Bash tool (run_in_background: true):
 ```bash
-codex exec --ephemeral -s read-only --json --skip-git-repo-check "Research: best practices for implementing rate limiting in Node.js APIs" 2>/dev/null > /tmp/codex.json
+codex exec --ephemeral -s read-only --json --skip-git-repo-check "Research: best practices for implementing rate limiting in Node.js APIs" < /dev/null 2>/dev/null > /tmp/codex.json
 ```
 
 Then synthesize findings from all three sources.
@@ -1022,9 +1027,10 @@ Then synthesize findings from all three sources.
 7. **Different models, different blind spots** - Each AI has different training; combined approaches outperform individuals
 8. **Always redirect Gemini stderr** - Use `2>/dev/null` to suppress extension warnings and MCP noise
 9. **Never run `claude -p` from Claude Code** - It will fail. Use the Task tool for the Claude leg of any consultation
-10. **Use `codex exec review` for code review** - The dedicated review subcommand auto-reads git diffs; no need to craft review prompts manually
-11. **Always use `--ephemeral -s read-only` for Codex** - Braintrust consultations are stateless and read-only. Only switch to `-s workspace-write` when the user explicitly asks Codex to make changes.
-12. **Never auto-fix review findings** - Present findings and let the user decide what to act on
+10. **Always close Codex stdin with `< /dev/null`** - Codex `exec "prompt"` reads stdin by default. Without `< /dev/null`, it hangs forever inside Claude Code's Bash tool with "Reading additional input from stdin...". This is the single most common reason Codex "doesn't work" in harnesses.
+11. **Use `codex exec review` for code review** - The dedicated review subcommand auto-reads git diffs; no need to craft review prompts manually
+12. **Always use `--ephemeral -s read-only` for Codex** - Braintrust consultations are stateless and read-only. Only switch to `-s workspace-write` when the user explicitly asks Codex to make changes.
+13. **Never auto-fix review findings** - Present findings and let the user decide what to act on
 
 ## Further Reading
 

@@ -156,7 +156,7 @@ If Gemini fails, check these in order:
 | **Claude** (from Claude Code) | Task tool with `subagent_type: "general-purpose"` | Task tool with `model: "haiku"` |
 | **Claude** (from other CLIs) | `claude -p "query" --model sonnet --output-format json` | `--model haiku` |
 | **Gemini** | Uses `$bt_gemini_model` from model probe (see below) | Uses `$bt_gemini_fast` from model probe |
-| **Antigravity (agy)** | `agy --print "$QUERY" --dangerously-skip-permissions 2>/dev/null` (fallback when gemini unavailable) | N/A (no model flag) |
+| **Antigravity (agy)** | `agy --print "$QUERY" --dangerously-skip-permissions 2>/dev/null` (**primary** Google AI path) | N/A (no model flag) |
 | **Codex** | `codex exec --ephemeral -s read-only --json --skip-git-repo-check "query" < /dev/null 2>/dev/null` | N/A |
 
 ### Gemini Standard Flags
@@ -1043,7 +1043,7 @@ Then synthesize findings from all three sources.
 >
 > **No output format control.** `agy --print` always returns plain text. No JSON or stream-json mode.
 >
-> **Use gemini first.** `agy` is the right fallback after the 2026-06-18 free-tier sunset, or if gemini is not installed. When `gemini` is available and working, prefer it for braintrust use.
+> **agy is the primary path.** Use `gemini` as a fallback when `agy` is unavailable, or when you need explicit model selection (`-m`) or `@path` file context — capabilities `agy` does not support.
 
 ### Codex
 | Flag | Purpose |

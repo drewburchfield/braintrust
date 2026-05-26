@@ -1,7 +1,7 @@
 {
   "name": "braintrust",
-  "version": "1.5.1",
-  "description": "Orchestrate other AI CLIs (Gemini, Codex, Claude Code) for second opinions, research, and codebase analysis",
+  "version": "1.5.2",
+  "description": "Orchestrate other AI CLIs (Antigravity/agy, Codex, Claude Code) for second opinions, research, and codebase analysis",
   "author": {
     "name": "Drew Burchfield",
     "url": "https://github.com/drewburchfield"
@@ -11,6 +11,8 @@
   "license": "MIT",
   "keywords": [
     "braintrust",
+    "antigravity",
+    "agy",
     "gemini",
     "codex",
     "multi-model",

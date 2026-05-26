@@ -1,6 +1,6 @@
 ---
 name: braintrust
-description: Orchestrate other AI CLIs (Gemini, Codex, Claude Code) for second opinions, research, codebase analysis, design review, security audits, and parallel research
+description: Orchestrate other AI CLIs (Gemini, Antigravity/agy, Codex, Claude Code) for second opinions, research, codebase analysis, design review, security audits, and parallel research
 ---
 
 # Braintrust
@@ -11,20 +11,27 @@ Consult your AI braintrust - the other AI CLIs available in your environment - f
 
 ## Default Behavior: Consult ALL THREE
 
-**Unless the user explicitly requests a specific model or narrower scope, ALWAYS consult all three models (Claude, Gemini, Codex) in parallel.**
+**Unless the user explicitly requests a specific model or narrower scope, ALWAYS consult all three models (Claude, Google AI [gemini or agy], Codex) in parallel.**
 
 This is not optional. The entire value of the braintrust is multi-model coverage - each model catches different issues. Consulting only one or two models defeats the purpose.
 
 **Launch all three in a single parallel batch using multiple tool calls in one response:**
 
-> **First call in a session?** Run the model probe (see "Model Discovery" section) before launching consultations. This takes ~10 seconds and ensures you use the best available Gemini model. If `/tmp/bt_models.env` already exists from an earlier call, skip the probe.
+> **First call in a session?** Run the model probe (see "Model Discovery" section) before launching consultations. This takes ~10 seconds and ensures you use the best available model. If `/tmp/bt_models.env` already exists from an earlier call, skip the probe.
 
 1. **Claude**: Use the Task tool with `subagent_type: "general-purpose"` and `run_in_background: true`
-2. **Gemini** (if `bt_gemini_available=true`): Use the Bash tool with `run_in_background: true`:
-   ```bash
-   source /tmp/bt_models.env 2>/dev/null || bt_gemini_model="gemini-2.5-pro"
-   gemini -p "$QUERY" -m "$bt_gemini_model" --approval-mode yolo --sandbox=none -o text 2>/dev/null
-   ```
+2. **Google AI** — use whichever is available, in this priority order:
+   - **Antigravity/agy** (if `bt_agy_available=true`): Use the Bash tool with `run_in_background: true`:
+     ```bash
+     agy --print "$QUERY" --dangerously-skip-permissions 2>/dev/null
+     ```
+     > **agy note:** No `-m` model flag (uses account default model). No `@path` file context — inline file content in the prompt or pipe via stdin. No output format control.
+   - **Gemini** (if `bt_agy_available=false` and `bt_gemini_available=true`): Use the Bash tool with `run_in_background: true`:
+     ```bash
+     source /tmp/bt_models.env 2>/dev/null || bt_gemini_model="gemini-2.5-pro"
+     gemini -p "$QUERY" -m "$bt_gemini_model" --approval-mode yolo --no-sandbox -o text 2>/dev/null
+     ```
+     > **gemini is the power-user path.** Supports explicit model selection, `@path` file context, and output format control. Use when `agy` is unavailable or when you need model-level control.
 3. **Codex** (if `bt_codex_available=true`): Use the Bash tool with `run_in_background: true`:
    ```bash
    codex exec --ephemeral -s read-only --json --skip-git-repo-check "$QUERY" < /dev/null 2>/dev/null > /tmp/codex.json
@@ -62,9 +69,10 @@ The result feels like "working with a small, experienced development team" rathe
 
 | You Are In | Your Braintrust | How to Call Claude |
 |------------|-----------------|-------------------|
-| Claude Code | Gemini + Codex + Claude | **Task tool** with subagent (the CLI blocks nested sessions) |
+| Claude Code | Gemini (or agy) + Codex + Claude | **Task tool** with subagent (the CLI blocks nested sessions) |
 | Gemini CLI | Claude + Codex | `claude -p "query" --model sonnet --output-format json` |
-| Codex CLI | Claude + Gemini | `claude -p "query" --model sonnet --output-format json` |
+| Antigravity (agy) | Claude + Codex | `claude -p "query" --model sonnet --output-format json` |
+| Codex CLI | Claude + Gemini (or agy) | `claude -p "query" --model sonnet --output-format json` |
 
 ### Calling Claude from Claude Code
 
@@ -90,7 +98,7 @@ This means **all three models are always available** regardless of which harness
 # Diagnostic health checks (only run if needed)
 # Note: Claude health check must run outside Claude Code (nested sessions blocked)
 source /tmp/bt_models.env 2>/dev/null || bt_gemini_fast="gemini-2.5-flash"
-gemini -p "say ok" -m "$bt_gemini_fast" --approval-mode yolo --sandbox=none -o text 2>/dev/null | grep -qi "ok" && echo "Gemini: OK" || echo "Gemini: FAILED"
+gemini -p "say ok" -m "$bt_gemini_fast" --approval-mode yolo --no-sandbox -o text 2>/dev/null | grep -qi "ok" && echo "Gemini: OK" || echo "Gemini: FAILED"
 codex exec --ephemeral -s read-only --json --skip-git-repo-check "test" < /dev/null 2>/dev/null | head -5 && echo "Codex: OK" || echo "Codex: FAILED"
 ```
 
@@ -99,6 +107,8 @@ When running from Claude Code, Claude itself is always available via the Task to
 **If missing, install:**
 - Claude: `npm install -g @anthropic-ai/claude-code`
 - Gemini: `npm install -g @google/gemini-cli` (also available via `brew install gemini-cli`)
+  > **Sunset notice:** Gemini CLI free-tier/OAuth access ends **2026-06-18**. Users on paid Gemini API keys or Google Cloud enterprise licenses are unaffected. After that date, free-tier users should switch to `agy`.
+- Antigravity CLI (agy): `curl -fsSL https://antigravity.google/cli/install.sh | bash` — Go binary, no npm package. Use as fallback when `gemini` is unavailable or after the free-tier sunset.
 - Codex: `npm install -g @openai/codex` (also available via `brew install --cask codex`)
 
 **Required utilities:** `jq` is used for parsing Codex JSONL output. Pre-installed on macOS. On Linux: `apt install jq` or `brew install jq`. Gemini uses `-o text` which needs no parsing.
@@ -130,10 +140,12 @@ If Gemini fails, check these in order:
 | Infinite retry / hung process | `gemini-3.1-pro-preview` capacity issues on some auth tiers (#23762). | The probe catches this via timeout. Add `timeout 120` to consultation calls. |
 | Exit code 53 | Turn limit exceeded (`maxSessionTurns` in `~/.gemini/settings.json`). | Increase `maxSessionTurns` or avoid `-o json` which triggers extra turns. |
 | Hangs waiting for tool approval | Model tries to use a tool in headless mode but can't get approval. | Always use `--approval-mode yolo` in headless calls. |
-| Slow startup | Extensions loading on every invocation. | The `--sandbox=none` flag helps. If still slow, consider `--extensions ""`. |
+| Slow startup | Extensions loading on every invocation. | The `--no-sandbox` flag helps. If still slow, consider `--extensions ""`. |
 | `FatalTurnLimitedError` with `-o json` | `-o json` triggers internal tool use that counts against turn limits. | Use `-o text` instead (already our default). |
 
 **Free-tier note:** As of March 2026, Google OAuth free-tier users only get Flash-level models. Pro models require either a Google One AI Pro subscription with billing linked, or an explicit `GEMINI_API_KEY` with billing enabled. The probe will fall back to `gemini-2.5-pro` (stable) automatically.
+
+**Sunset notice (2026-06-18):** Gemini CLI stops serving requests for free/OAuth, Google AI Pro, and Google AI Ultra users on June 18, 2026. Enterprise (Gemini Code Assist Standard/Enterprise) and paid Gemini API key users are unaffected. After this date, free-tier users should switch to `agy` (Antigravity CLI) — the probe handles this automatically via `bt_agy_available`.
 
 ## Braintrust Defaults
 
@@ -144,6 +156,7 @@ If Gemini fails, check these in order:
 | **Claude** (from Claude Code) | Task tool with `subagent_type: "general-purpose"` | Task tool with `model: "haiku"` |
 | **Claude** (from other CLIs) | `claude -p "query" --model sonnet --output-format json` | `--model haiku` |
 | **Gemini** | Uses `$bt_gemini_model` from model probe (see below) | Uses `$bt_gemini_fast` from model probe |
+| **Antigravity (agy)** | `agy --print "$QUERY" --dangerously-skip-permissions 2>/dev/null` (fallback when gemini unavailable) | N/A (no model flag) |
 | **Codex** | `codex exec --ephemeral -s read-only --json --skip-git-repo-check "query" < /dev/null 2>/dev/null` | N/A |
 
 ### Gemini Standard Flags
@@ -151,17 +164,17 @@ If Gemini fails, check these in order:
 **Every headless Gemini call must include these flags.** They prevent silent hangs and unnecessary overhead:
 
 ```bash
-gemini -p "$QUERY" -m "$bt_gemini_model" --approval-mode yolo --sandbox=none -o text 2>/dev/null
+gemini -p "$QUERY" -m "$bt_gemini_model" --approval-mode yolo --no-sandbox -o text 2>/dev/null
 ```
 
 | Flag | Why |
 |------|-----|
 | `--approval-mode yolo` | Prevents Gemini from hanging when it wants to use a tool and waits for approval that never comes in headless mode |
-| `--sandbox=none` | Skips sandbox initialization overhead. Braintrust queries are read-only consultations, no sandboxing needed. |
+| `--no-sandbox` | Skips sandbox initialization overhead. Braintrust queries are read-only consultations, no sandboxing needed. |
 | `-o text` | Avoids `FatalTurnLimitedError` with `-o json` when `maxSessionTurns: 1`. Text needs no parsing. |
 | `2>/dev/null` | Suppresses extension/MCP loading noise on stderr |
 
-All Gemini examples in this file assume these flags. When you see a short example like `gemini -p "query" -m "$bt_gemini_model" -o text 2>/dev/null`, always add `--approval-mode yolo --sandbox=none` in the actual command.
+All Gemini examples in this file assume these flags. When you see a short example like `gemini -p "query" -m "$bt_gemini_model" -o text 2>/dev/null`, always add `--approval-mode yolo --no-sandbox` in the actual command.
 
 ### Model Discovery (Run Once Per Session)
 
@@ -185,13 +198,27 @@ else
 fi
 run_with_timeout() { if [ -n "$TIMEOUT_CMD" ]; then $TIMEOUT_CMD "$@"; else shift; "$@"; fi; }
 
-# --- Gemini ---
+# --- Antigravity CLI (agy) - primary Google AI path ---
+bt_agy_available="false"
+if command -v agy &>/dev/null; then
+  agy_result=$(run_with_timeout 20 agy --print "say ok" --dangerously-skip-permissions 2>/dev/null | head -5)
+  if [ -n "$agy_result" ]; then
+    bt_agy_available="true"
+    echo "Antigravity (agy): available"
+  else
+    echo "Antigravity (agy): CLI found but returned empty response"
+  fi
+else
+  echo "Antigravity (agy): not installed (install: curl -fsSL https://antigravity.google/cli/install.sh | bash)"
+fi
+
+# --- Gemini - fallback / power-user path (explicit model selection, @path context) ---
 bt_gemini_model=""
 bt_gemini_fast=""
 bt_gemini_available="false"
 if command -v gemini &>/dev/null; then
   gemini_probe() {
-    run_with_timeout 20 gemini -p "say ok" -m "$1" --approval-mode yolo --sandbox=none -o text 2>/dev/null | grep -qi "ok"
+    run_with_timeout 20 gemini -p "say ok" -m "$1" --approval-mode yolo --no-sandbox -o text 2>/dev/null | grep -qi "ok"
   }
   # Order: gemini-2.5-pro first (stable), then 3.1-pro-preview (flaky: upstream bug #24290
   # causes empty responses, and availability is inconsistent with 429s on many auth tiers)
@@ -203,12 +230,12 @@ if command -v gemini &>/dev/null; then
   done
   if [ -n "$bt_gemini_model" ]; then
     bt_gemini_available="true"
-    echo "Gemini: $bt_gemini_model (fast: $bt_gemini_fast)"
+    echo "Gemini: $bt_gemini_model (fast: $bt_gemini_fast) [fallback / explicit model selection]"
   else
     echo "Gemini: CLI found but no models responded"
   fi
 else
-  echo "Gemini: CLI not installed"
+  echo "Gemini: not installed"
 fi
 
 # --- Codex ---
@@ -234,6 +261,7 @@ cat > /tmp/bt_models.env << EOF
 bt_gemini_model=${bt_gemini_model:-gemini-2.5-pro}
 bt_gemini_fast=${bt_gemini_fast:-gemini-2.5-flash}
 bt_gemini_available=${bt_gemini_available}
+bt_agy_available=${bt_agy_available}
 bt_codex_available=${bt_codex_available}
 EOF
 
@@ -251,7 +279,9 @@ source /tmp/bt_models.env 2>/dev/null || bt_gemini_model="gemini-2.5-pro"
 ```
 
 **Graceful degradation rules:**
-- If `bt_gemini_available=false`, skip Gemini and note it in the synthesis
+- Primary Google AI path is `agy` (if `bt_agy_available=true`)
+- Fall back to `gemini` only if `bt_agy_available=false` and `bt_gemini_available=true`; note that gemini supports explicit model selection and `@path` context that agy does not
+- If both `bt_agy_available=false` and `bt_gemini_available=false`, skip Google AI entirely and note the gap
 - If `bt_codex_available=false`, skip Codex and note it in the synthesis
 - Claude is always available via the Task tool when running in Claude Code
 - If only one CLI is available, run it alone and note the limited coverage
@@ -264,7 +294,7 @@ Even after the probe, a model can fail mid-consultation (quota, rate limit, tran
 ```bash
 # Gemini with error detection and retry
 source /tmp/bt_models.env 2>/dev/null || bt_gemini_model="gemini-2.5-pro"
-gemini_response=$(timeout 120 gemini -p "$QUERY" -m "$bt_gemini_model" --approval-mode yolo --sandbox=none -o text 2>/dev/null)
+gemini_response=$(timeout 120 gemini -p "$QUERY" -m "$bt_gemini_model" --approval-mode yolo --no-sandbox -o text 2>/dev/null)
 gemini_exit=$?
 if [ $gemini_exit -eq 124 ]; then
   echo "GEMINI_FAILED: timed out after 120s"
@@ -272,7 +302,7 @@ elif [ $gemini_exit -eq 53 ]; then
   echo "GEMINI_FAILED: turn limit exceeded (check maxSessionTurns in ~/.gemini/settings.json)"
 elif [ -z "$gemini_response" ]; then
   # Retry once: gemini-3.x has an upstream bug (#24290) where empty responses happen intermittently
-  gemini_response=$(timeout 120 gemini -p "$QUERY" -m "$bt_gemini_model" --approval-mode yolo --sandbox=none -o text 2>/dev/null)
+  gemini_response=$(timeout 120 gemini -p "$QUERY" -m "$bt_gemini_model" --approval-mode yolo --no-sandbox -o text 2>/dev/null)
   if [ -z "$gemini_response" ]; then
     echo "GEMINI_FAILED: empty response after retry (check model availability or rate limits)"
   else
@@ -402,7 +432,7 @@ Get a second opinion from the braintrust. **Always source the model probe first:
 ```bash
 # Consult Gemini (via Bash tool) - uses probed model
 source /tmp/bt_models.env 2>/dev/null || bt_gemini_model="gemini-2.5-pro"
-timeout 120 gemini -p "Review this implementation approach: [CONTEXT]" -m "$bt_gemini_model" --approval-mode yolo --sandbox=none -o text 2>/dev/null
+timeout 120 gemini -p "Review this implementation approach: [CONTEXT]" -m "$bt_gemini_model" --approval-mode yolo --no-sandbox -o text 2>/dev/null
 
 # Consult Codex (via Bash tool)
 codex exec --ephemeral -s read-only --json --skip-git-repo-check "Review this implementation approach: [CONTEXT]" < /dev/null 2>/dev/null | jq -rs 'map(select(.item.type? == "agent_message")) | last | .item.text'
@@ -484,7 +514,7 @@ claude -p "[QUERY]" --model haiku --output-format json
 
 # Gemini Flash
 source /tmp/bt_models.env 2>/dev/null || bt_gemini_fast="gemini-2.5-flash"
-gemini -p "[QUERY]" -m "$bt_gemini_fast" --approval-mode yolo --sandbox=none -o text 2>/dev/null
+gemini -p "[QUERY]" -m "$bt_gemini_fast" --approval-mode yolo --no-sandbox -o text 2>/dev/null
 ```
 
 ### Parallel Research (from Claude Code)
@@ -501,7 +531,7 @@ model: "sonnet"
 **Tool call 2** - Bash tool (run_in_background: true):
 ```bash
 source /tmp/bt_models.env 2>/dev/null || bt_gemini_model="gemini-2.5-pro"
-timeout 120 gemini -p "Research: $TOPIC" -m "$bt_gemini_model" --approval-mode yolo --sandbox=none -o text 2>/dev/null > /tmp/gemini.txt
+timeout 120 gemini -p "Research: $TOPIC" -m "$bt_gemini_model" --approval-mode yolo --no-sandbox -o text 2>/dev/null > /tmp/gemini.txt
 ```
 
 **Tool call 3** - Bash tool (run_in_background: true):
@@ -794,13 +824,13 @@ With `-o text`, Gemini returns plain text directly to stdout. No JSON parsing ne
 
 ```bash
 # Direct usage - response prints to stdout
-gemini -p "your query" -m "$bt_gemini_model" --approval-mode yolo --sandbox=none -o text 2>/dev/null
+gemini -p "your query" -m "$bt_gemini_model" --approval-mode yolo --no-sandbox -o text 2>/dev/null
 
 # Capture to variable
-gemini_response=$(timeout 120 gemini -p "your query" -m "$bt_gemini_model" --approval-mode yolo --sandbox=none -o text 2>/dev/null)
+gemini_response=$(timeout 120 gemini -p "your query" -m "$bt_gemini_model" --approval-mode yolo --no-sandbox -o text 2>/dev/null)
 
 # Save to file for later reading
-timeout 120 gemini -p "your query" -m "$bt_gemini_model" --approval-mode yolo --sandbox=none -o text 2>/dev/null > /tmp/gemini.txt
+timeout 120 gemini -p "your query" -m "$bt_gemini_model" --approval-mode yolo --no-sandbox -o text 2>/dev/null > /tmp/gemini.txt
 ```
 
 > **Why `-o text` instead of `-o json`?** `-o json` triggers internal tool use, which counts against `maxSessionTurns` in `~/.gemini/settings.json`. With `maxSessionTurns: 1` (a common headless setting), `-o json` fails with `FatalTurnLimitedError`. `-o text` avoids this entirely.
@@ -885,7 +915,7 @@ gemini -p "@src/ Review this codebase for security vulnerabilities:
 3. XSS vulnerabilities
 4. CSRF protection
 5. Secrets in code
-6. Rate limiting gaps" -m "$bt_gemini_model" --approval-mode yolo --sandbox=none -o text 2>/dev/null > /tmp/gemini-security.txt
+6. Rate limiting gaps" -m "$bt_gemini_model" --approval-mode yolo --no-sandbox -o text 2>/dev/null > /tmp/gemini-security.txt
 ```
 
 **Tool call 3** - Bash tool (run_in_background: true):
@@ -942,7 +972,7 @@ model: "sonnet"
 
 **Tool call 2** - Bash tool (run_in_background: true):
 ```bash
-timeout 120 gemini -p "Research: best practices for implementing rate limiting in Node.js APIs" -m "$bt_gemini_model" --approval-mode yolo --sandbox=none -o text 2>/dev/null > /tmp/gemini.txt
+timeout 120 gemini -p "Research: best practices for implementing rate limiting in Node.js APIs" -m "$bt_gemini_model" --approval-mode yolo --no-sandbox -o text 2>/dev/null > /tmp/gemini.txt
 ```
 
 **Tool call 3** - Bash tool (run_in_background: true):
@@ -994,6 +1024,26 @@ Then synthesize findings from all three sources.
 > **Free tier limits (Google OAuth):** Free tier is now restricted to Flash-level models only. Pro models require a billing account linked in AI Studio or an API key (`GEMINI_API_KEY`) with billing enabled.
 >
 > **Exit codes:** `0` success, `1` general error, `42` input error, `53` turn limit exceeded.
+
+### Antigravity CLI (agy)
+| Flag | Purpose |
+|------|---------|
+| `-p, --print, --prompt` | Non-interactive (headless) print mode |
+| `--print-timeout` | Timeout for print mode (default `5m0s`) |
+| `--dangerously-skip-permissions` | Auto-approve all tool permission requests (replaces `--approval-mode yolo`) |
+| `--sandbox` | Enable sandbox with terminal restrictions (boolean; omit to disable) |
+| `--continue` / `-c` | Continue the most recent conversation |
+| `--conversation` | Resume a previous conversation by ID |
+| `--add-dir` | Add a directory to the workspace (repeatable) |
+| `--prompt-interactive` / `-i` | Run initial prompt then continue interactively |
+
+> **No model selection.** `agy` has no `-m` flag. The model used depends on your Google account tier. It defaults to Gemini 3.5 Flash on free tier, higher models on paid tiers.
+>
+> **No `@path` file context.** Unlike `gemini`, `agy` does not support `@src/` style file includes in headless mode. Pass file content via stdin or inline in the prompt string.
+>
+> **No output format control.** `agy --print` always returns plain text. No JSON or stream-json mode.
+>
+> **Use gemini first.** `agy` is the right fallback after the 2026-06-18 free-tier sunset, or if gemini is not installed. When `gemini` is available and working, prefer it for braintrust use.
 
 ### Codex
 | Flag | Purpose |

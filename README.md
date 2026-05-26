@@ -10,7 +10,9 @@ A [Claude Code](https://docs.anthropic.com/en/docs/claude-code) plugin from the 
 
 ## What it does
 
-Delegates tasks to other AI CLIs (Gemini, Codex, Claude Code) running in parallel. Get second opinions on architecture decisions, offload research to models with larger context windows, or run design reviews across multiple models simultaneously.
+Delegates tasks to other AI CLIs running in parallel. Get second opinions on architecture decisions, offload research to models with larger context windows, or run design reviews across multiple models simultaneously.
+
+Supports three CLIs as braintrust members: **Antigravity CLI (agy)**, **Codex**, and **Claude** (via Task tool subagent). Gemini CLI is also supported as a power-user fallback with explicit model selection and `@path` file context.
 
 ## Commands
 
@@ -21,24 +23,26 @@ Delegates tasks to other AI CLIs (Gemini, Codex, Claude Code) running in paralle
 
 ## Use Cases
 
-- Offload grunt work to Gemini (1M context window)
-- Get second opinions from different models
+- Get second opinions from different models simultaneously
 - Cross-model code review (Codex `exec review` or parallel all three)
 - Validate architecture decisions
 - Parallel research across multiple models
 - Security audits with diverse model perspectives
+- Offload large-context work to Google AI (agy / gemini 1M context)
 
-## v1.5.0 Highlights
+## v2.0.0 Highlights
 
-- **Codex**: stateless consultations (`--ephemeral -s read-only`), XML-structured prompts for better output, dedicated `codex exec review` for code review, model aliases (`spark`, `mini`)
-- **Gemini**: headless reliability (`--approval-mode yolo --sandbox=none`), timeouts on all calls, retry on empty response, stable model defaults (2.5-pro over flaky 3.1-pro-preview)
-- **Results discipline**: review findings are presented, never auto-applied
+- **Antigravity CLI (agy)** is now the primary Google AI path. `gemini` is retained as a fallback for users who need explicit model selection or `@path` file context.
+- **`--no-sandbox`** replaces `--sandbox=none` for Gemini CLI (correct boolean flag form).
+- **Session probe** now checks `agy` first, then `gemini`, and caches `bt_agy_available` alongside existing env vars.
+- **June 18, 2026 sunset**: Gemini CLI free-tier/OAuth access ends. The probe handles the switch automatically.
 
 ## Requirements
 
 - [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code)
-- [Gemini CLI](https://github.com/google-gemini/gemini-cli)
+- [Antigravity CLI (agy)](https://antigravity.google/product/antigravity-cli) — `curl -fsSL https://antigravity.google/cli/install.sh | bash`
 - [Codex CLI](https://github.com/openai/codex)
+- [Gemini CLI](https://github.com/google-gemini/gemini-cli) *(optional — power-user fallback; free-tier sunset 2026-06-18)*
 
 ## Install
 

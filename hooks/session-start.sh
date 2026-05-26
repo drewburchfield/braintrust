@@ -22,6 +22,7 @@ check_cli() {
 }
 
 check_cli "gemini" "install with: npm install -g @google/gemini-cli or see https://github.com/google-gemini/gemini-cli"
+check_cli "agy" "install with: curl -fsSL https://antigravity.google/cli/install.sh | bash (Google Antigravity CLI - replaces gemini free-tier after 2026-06-18)"
 check_cli "codex" "install with: npm install -g @openai/codex"
 check_cli "claude" "install with: npm install -g @anthropic-ai/claude-code"
 

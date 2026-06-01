@@ -1,7 +1,7 @@
 {
   "name": "braintrust",
-  "version": "1.5.2",
-  "description": "Orchestrate other AI CLIs (Antigravity/agy, Codex, Claude Code) for second opinions, research, and codebase analysis",
+  "version": "1.6.0",
+  "description": "Orchestrate other AI CLIs (Antigravity/agy, Gemini, Codex, Grok, Claude Code) for second opinions, research, and codebase analysis",
   "author": {
     "name": "Drew Burchfield",
     "url": "https://github.com/drewburchfield"
@@ -15,6 +15,8 @@
     "agy",
     "gemini",
     "codex",
+    "grok",
+    "xai",
     "multi-model",
     "second-opinion",
     "code-review"

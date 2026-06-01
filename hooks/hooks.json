@@ -1,5 +1,5 @@
 {
-  "description": "SessionStart hook - checks availability of AI CLI tools (gemini, codex, claude)",
+  "description": "SessionStart hook - checks availability of AI CLI tools (gemini, agy, codex, grok, claude)",
   "hooks": {
     "SessionStart": [
       {

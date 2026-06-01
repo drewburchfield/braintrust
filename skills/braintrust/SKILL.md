@@ -1,6 +1,6 @@
 ---
 name: braintrust
-description: Orchestrate other AI CLIs (Gemini, Antigravity/agy, Codex, Claude Code) for second opinions, research, codebase analysis, design review, security audits, and parallel research
+description: Orchestrate other AI CLIs (Antigravity/agy, Gemini, Codex, Grok, Claude Code) for second opinions, research, codebase analysis, design review, security audits, and parallel research
 ---
 
 # Braintrust
@@ -9,46 +9,55 @@ Consult your AI braintrust - the other AI CLIs available in your environment - f
 
 > **Important:** Run ALL braintrust CLI invocations (including health checks and consultations) as background tasks using `run_in_background: true`. This allows monitoring progress instead of blocking.
 
-## Default Behavior: Consult ALL THREE
+## Default Behavior: Consult EVERY AVAILABLE CLI
 
-**Unless the user explicitly requests a specific model or narrower scope, ALWAYS consult all three models (Claude, Google AI [gemini or agy], Codex) in parallel.**
+**Unless the user explicitly requests a specific model or narrower scope, ALWAYS consult every braintrust CLI the probe marks installed AND authenticated, in parallel.** A full consult is up to four independent voices: **Claude**, **Google AI** (agy, or gemini), **Codex**, and **Grok**.
 
-This is not optional. The entire value of the braintrust is multi-model coverage - each model catches different issues. Consulting only one or two models defeats the purpose.
+Membership is decided by availability, not by your judgement: if a CLI is installed and authenticated, it's in. If it isn't, skip it and note the gap. Do not drop an available CLI to "save time" — multi-model coverage is the entire point; each model catches what the others miss.
 
-**Launch all three in a single parallel batch using multiple tool calls in one response:**
+> The Google AI slot is **one voice**, not two. agy and gemini are two access paths to Google's models (see "agy vs Gemini: Two Different Model Paths"). Use **agy when available** (it runs your best account-tier model); fall back to **gemini** only when agy is unavailable. Never launch both for the same query.
 
-> **First call in a session?** Run the model probe (see "Model Discovery" section) before launching consultations. This takes ~10 seconds and ensures you use the best available model. If `/tmp/bt_models.env` already exists from an earlier call, skip the probe.
+**Launch all available members in a single parallel batch using multiple tool calls in one response:**
 
-1. **Claude**: Use the Task tool with `subagent_type: "general-purpose"` and `run_in_background: true`
-2. **Google AI** — use whichever is available, in this priority order:
+> **First call in a session?** Run the model probe (see "Model Discovery" section) first. It takes ~30-90s and decides who's in (installed + authenticated) and which models to use. If `/tmp/bt_models.env` already exists from an earlier call, skip the probe.
+
+1. **Claude** (always available from Claude Code): Use the Task tool with `subagent_type: "general-purpose"` and `run_in_background: true`
+2. **Google AI** — use exactly one path, in this priority order:
    - **Antigravity/agy** (if `bt_agy_available=true`): Use the Bash tool with `run_in_background: true`:
      ```bash
      agy --print "$QUERY" --dangerously-skip-permissions 2>/dev/null
      ```
-     > **agy note:** No `-m` model flag (uses account default model). No `@path` file context — inline file content in the prompt or pipe via stdin. No output format control.
-   - **Gemini** (if `bt_agy_available=false` and `bt_gemini_available=true`): Use the Bash tool with `run_in_background: true`:
+     > **agy note:** No `-m` model flag (runs your Antigravity account-tier model). No `@path` file context — inline file content in the prompt or pipe via stdin. No output format control. Cold start can take 30-60s; give it time.
+   - **Gemini** (only if `bt_agy_available=false` and `bt_gemini_available=true`): Use the Bash tool with `run_in_background: true`:
      ```bash
-     source /tmp/bt_models.env 2>/dev/null || bt_gemini_model="gemini-2.5-pro"
+     source /tmp/bt_models.env 2>/dev/null || bt_gemini_model="gemini-3.1-pro-preview"
      gemini -p "$QUERY" -m "$bt_gemini_model" --approval-mode yolo --no-sandbox -o text 2>/dev/null
      ```
-     > **gemini is the power-user path.** Supports explicit model selection, `@path` file context, and output format control. Use when `agy` is unavailable or when you need model-level control.
+     > **gemini is the power-user path.** Supports explicit model selection (`-m`), `@path` file context, and output format control. Use when `agy` is unavailable or when you need model-level control.
 3. **Codex** (if `bt_codex_available=true`): Use the Bash tool with `run_in_background: true`:
    ```bash
    codex exec --ephemeral -s read-only --json --skip-git-repo-check "$QUERY" < /dev/null 2>/dev/null > /tmp/codex.json
    ```
 
    > **Always include `< /dev/null`.** Codex's `exec "prompt"` reads stdin by default and hangs forever when the harness pipes to it. This is the single most common reason Codex appears broken. See "Common Codex Failure Modes" below.
+4. **Grok** (if `bt_grok_available=true`): Use the Bash tool with `run_in_background: true`:
+   ```bash
+   source /tmp/bt_models.env 2>/dev/null || bt_grok_model="grok-build"
+   grok -p "$QUERY" -m "$bt_grok_model" --output-format json 2>/dev/null | jq -r '.text'
+   ```
 
-> **Skip unavailable CLIs.** If the probe marked a CLI as unavailable, do not launch it. Note the gap in your synthesis instead.
+   > **Grok note:** `grok-build` is Grok 4.3 and needs a Grok subscription. The `json` format returns `{"text": ..., "thought": ...}`; parse the answer with `jq -r '.text'`. See "Common Grok Failure Modes" below.
 
-Present each model's findings to the user as they arrive. After all three respond, synthesize the findings and save a session file.
+> **Skip unavailable CLIs.** If the probe marked a CLI as unavailable or unauthenticated, do not launch it. Note the gap in your synthesis instead.
 
-**Only skip a model if:**
+Present each model's findings to the user as they arrive. After all available members respond, synthesize the findings and save a session file.
+
+**Only skip an available model if:**
 - The user explicitly asks for a specific model (e.g., "ask Gemini about...")
 - A model fails and diagnostics show it's unavailable
 - The task is a trivial single-fact lookup (rare)
 
-**Do NOT rationalize using fewer models.** Thoughts like "Gemini is better for this" or "two models should be enough" are wrong - always use all three unless directed otherwise.
+**Do NOT rationalize using fewer models.** Thoughts like "Gemini is better for this" or "three should be enough" are wrong - consult every authenticated CLI unless directed otherwise.
 
 ---
 
@@ -65,14 +74,15 @@ The result feels like "working with a small, experienced development team" rathe
 
 ## Core Concept
 
-**All three CLIs are available as your braintrust.** How you call each depends on where you're running:
+**Every other CLI in your environment is a braintrust member.** How you call each depends on where you're running:
 
 | You Are In | Your Braintrust | How to Call Claude |
 |------------|-----------------|-------------------|
-| Claude Code | Gemini (or agy) + Codex + Claude | **Task tool** with subagent (the CLI blocks nested sessions) |
-| Gemini CLI | Claude + Codex | `claude -p "query" --model sonnet --output-format json` |
-| Antigravity (agy) | Claude + Codex | `claude -p "query" --model sonnet --output-format json` |
-| Codex CLI | Claude + Gemini (or agy) | `claude -p "query" --model sonnet --output-format json` |
+| Claude Code | Google AI (agy or gemini) + Codex + Grok + Claude | **Task tool** with subagent (the CLI blocks nested sessions) |
+| Gemini CLI | Claude + Codex + Grok | `claude -p "query" --model sonnet --output-format json` |
+| Antigravity (agy) | Claude + Codex + Grok | `claude -p "query" --model sonnet --output-format json` |
+| Codex CLI | Claude + Google AI + Grok | `claude -p "query" --model sonnet --output-format json` |
+| Grok CLI | Claude + Google AI + Codex | `claude -p "query" --model sonnet --output-format json` |
 
 ### Calling Claude from Claude Code
 
@@ -86,7 +96,7 @@ or `subagent_type: "Explore"` for quick codebase searches.
 This spawns an independent Claude session with its own context.
 ```
 
-This means **all three models are always available** regardless of which harness you're in.
+This means **every installed model is reachable** regardless of which harness you're in.
 
 ## Prerequisites
 
@@ -97,9 +107,11 @@ This means **all three models are always available** regardless of which harness
 ```bash
 # Diagnostic health checks (only run if needed)
 # Note: Claude health check must run outside Claude Code (nested sessions blocked)
-source /tmp/bt_models.env 2>/dev/null || bt_gemini_fast="gemini-2.5-flash"
+source /tmp/bt_models.env 2>/dev/null || { bt_gemini_fast="gemini-3-flash-preview"; bt_grok_model="grok-build"; }
+agy --print "say ok" --dangerously-skip-permissions 2>/dev/null | grep -qi "ok" && echo "agy: OK" || echo "agy: FAILED (cold start? retry once)"
 gemini -p "say ok" -m "$bt_gemini_fast" --approval-mode yolo --no-sandbox -o text 2>/dev/null | grep -qi "ok" && echo "Gemini: OK" || echo "Gemini: FAILED"
 codex exec --ephemeral -s read-only --json --skip-git-repo-check "test" < /dev/null 2>/dev/null | head -5 && echo "Codex: OK" || echo "Codex: FAILED"
+grok -p "say ok" -m "$bt_grok_model" --output-format json 2>/dev/null | jq -r '.text' | grep -qi "ok" && echo "Grok: OK" || echo "Grok: FAILED (run: grok login)"
 ```
 
 When running from Claude Code, Claude itself is always available via the Task tool. No health check needed.
@@ -108,10 +120,11 @@ When running from Claude Code, Claude itself is always available via the Task to
 - Claude: `npm install -g @anthropic-ai/claude-code`
 - Gemini: `npm install -g @google/gemini-cli` (also available via `brew install gemini-cli`)
   > **Sunset notice:** Gemini CLI free-tier/OAuth access ends **2026-06-18**. Users on paid Gemini API keys or Google Cloud enterprise licenses are unaffected. After that date, free-tier users should switch to `agy`.
-- Antigravity CLI (agy): `curl -fsSL https://antigravity.google/cli/install.sh | bash` — Go binary, no npm package. Use as fallback when `gemini` is unavailable or after the free-tier sunset.
+- Antigravity CLI (agy): `curl -fsSL https://antigravity.google/cli/install.sh | bash` — Go binary, no npm package. **Primary Google AI path.** Use `gemini` as fallback when `agy` is unavailable or when you need explicit model selection.
 - Codex: `npm install -g @openai/codex` (also available via `brew install --cask codex`)
+- Grok (Grok Build): `curl -fsSL https://x.ai/cli/install.sh | bash` (Windows PowerShell: `irm https://x.ai/cli/install.ps1 | iex`). Self-updating binary at `~/.grok/bin/grok`. Authenticate with `grok login` (OAuth) or set `XAI_API_KEY` from [console.x.ai](https://console.x.ai). The default `grok-build` model (Grok 4.3) **requires an active Grok subscription**.
 
-**Required utilities:** `jq` is used for parsing Codex JSONL output. Pre-installed on macOS. On Linux: `apt install jq` or `brew install jq`. Gemini uses `-o text` which needs no parsing.
+**Required utilities:** `jq` is used for parsing Codex JSONL output and Grok JSON output. Pre-installed on macOS. On Linux: `apt install jq` or `brew install jq`. Gemini uses `-o text` which needs no parsing; agy returns plain text.
 
 ### Common Codex Failure Modes
 
@@ -143,9 +156,35 @@ If Gemini fails, check these in order:
 | Slow startup | Extensions loading on every invocation. | The `--no-sandbox` flag helps. If still slow, consider `--extensions ""`. |
 | `FatalTurnLimitedError` with `-o json` | `-o json` triggers internal tool use that counts against turn limits. | Use `-o text` instead (already our default). |
 
-**Free-tier note:** As of March 2026, Google OAuth free-tier users only get Flash-level models. Pro models require either a Google One AI Pro subscription with billing linked, or an explicit `GEMINI_API_KEY` with billing enabled. The probe will fall back to `gemini-2.5-pro` (stable) automatically.
+**Free-tier note:** As of March 2026, Google OAuth free-tier users only get Flash-level models. Pro models require either a Google One AI Pro subscription with billing linked, or an explicit `GEMINI_API_KEY` with billing enabled. The probe tries `gemini-3.1-pro-preview` first and falls back through `gemini-2.5-pro` automatically if the newer model doesn't respond.
 
 **Sunset notice (2026-06-18):** Gemini CLI stops serving requests for free/OAuth, Google AI Pro, and Google AI Ultra users on June 18, 2026. Enterprise (Gemini Code Assist Standard/Enterprise) and paid Gemini API key users are unaffected. After this date, free-tier users should switch to `agy` (Antigravity CLI) — the probe handles this automatically via `bt_agy_available`.
+
+### Common Antigravity (agy) Failure Modes
+
+agy is a VS Code-fork-based CLI: `agy --print` spins up a headless Antigravity editor-agent backend that talks to a relay. It is **reliable warm (~4-5s)** but has occasional cold-start and transient-empty behavior. Its failures look like "agy is unavailable" but are almost always transient — retrying usually fixes them. (Observed directly: not a rate limit, no error on stderr; just an occasional empty or slow first call.)
+
+| Symptom | Cause | Fix |
+|---------|-------|-----|
+| Times out on the first call, fast (~5s) on the next | **Cold start.** The first agy invocation spins up the editor-agent backend and can exceed a short timeout; warm calls return in ~5s. | Give the probe/consult a generous timeout (≥45s) plus one retry. **This is the #1 cause of agy↔gemini "thrashing":** a short-timeout false-negative marks agy unavailable, silently flips the Google AI slot to gemini, then the next session agy is warm and wins again. |
+| Empty stdout, exit 0 | Transient backend non-response (relay hiccup). No stderr, no error message. | Retry once — the probe does this automatically. The next call almost always succeeds. |
+| No model control | agy has **no `-m` flag** by design — it runs your Antigravity account-tier model. | If you need a specific model, use `gemini -m` instead. See "agy vs Gemini: Two Different Model Paths". |
+| Won't report its own model name | agy returns empty for "what model are you" style identity prompts. | Expected. Don't probe agy with identity questions; use a concrete task prompt. |
+
+> **Practical rule:** treat a single empty/timed-out agy result as transient, not terminal. Retry once with a ≥45s timeout before falling back to gemini. Don't conclude agy is "down" from one bad call.
+
+### Common Grok Failure Modes
+
+If Grok fails, check these in order:
+
+| Symptom | Cause | Fix |
+|---------|-------|-----|
+| `A subscription is required` / access gate | `grok-build` (Grok 4.3) requires an active Grok subscription (SuperGrok). | Subscribe at grok.com, or set `XAI_API_KEY` from console.x.ai for API-key auth. |
+| `run grok login` / auth error | Not signed in. | Run `grok login` (OAuth) or export `XAI_API_KEY`. |
+| Empty `.text` from `jq` | Wrong output format, or the answer is under a different field. | Use `--output-format json` and parse `jq -r '.text'`. The `thought` field holds reasoning, not the answer. |
+| Hangs / interactive UI opens | Missing `-p`/`--single`. Without it, grok launches its TUI. | Always pass `-p "$QUERY"` for headless use. |
+| Model 404 | Unknown model id. | Valid ids: `grok-build` (default, Grok 4.3) and `grok-composer-2.5-fast`. Run `grok models` to list. |
+| A `cache/projects.json` appears in your repo | grok writes a per-project session registry into its **working directory** (observed: a bare `grok -p` inside a repo creates `./cache/projects.json`). | Harmless — safe to delete. To keep it out of the repo, add `cache/` to `.gitignore`, or pass `--cwd <scratch-dir>` (verified to keep the repo clean). |
 
 ## Braintrust Defaults
 
@@ -158,6 +197,7 @@ If Gemini fails, check these in order:
 | **Gemini** | Uses `$bt_gemini_model` from model probe (see below) | Uses `$bt_gemini_fast` from model probe |
 | **Antigravity (agy)** | `agy --print "$QUERY" --dangerously-skip-permissions 2>/dev/null` (**primary** Google AI path) | N/A (no model flag) |
 | **Codex** | `codex exec --ephemeral -s read-only --json --skip-git-repo-check "query" < /dev/null 2>/dev/null` | N/A |
+| **Grok** | `grok -p "query" -m grok-build --output-format json 2>/dev/null \| jq -r '.text'` | `-m grok-composer-2.5-fast` |
 
 ### Gemini Standard Flags
 
@@ -176,6 +216,30 @@ gemini -p "$QUERY" -m "$bt_gemini_model" --approval-mode yolo --no-sandbox -o te
 
 All Gemini examples in this file assume these flags. When you see a short example like `gemini -p "query" -m "$bt_gemini_model" -o text 2>/dev/null`, always add `--approval-mode yolo --no-sandbox` in the actual command.
 
+### agy vs Gemini: Two Different Model Paths
+
+**`agy` and `gemini` are not interchangeable.** They are two different ways to reach Google's models, with different models behind each. They fill **one** Google AI slot in the braintrust — pick one per query (agy preferred), never both. Confusing them is what makes the model "thrash" between the two.
+
+| | **Antigravity CLI (`agy`)** | **Gemini CLI (`gemini`)** |
+|---|---|---|
+| **Role** | **Primary** Google AI path | **Fallback** / power-user path |
+| **Model selection** | **None.** No `-m` flag. Runs your Antigravity **account-tier** model (a high-tier Gemini 3.x on paid Antigravity; a Flash-class model on free). You cannot pin a specific model. | **Explicit.** `-m gemini-3.1-pro-preview`, `-m gemini-2.5-pro`, etc. You choose the exact model. |
+| **File context** | None. Inline file content in the prompt or pipe via stdin. | `@path` includes (e.g. `-p "@src/ review this"`), `-a` for all files. |
+| **Output format** | Plain text only. | `-o text` (use this), `-o json`, `-o stream-json`. |
+| **Headless flag** | `--print` / `-p`, with `--dangerously-skip-permissions` | `-p`, with `--approval-mode yolo --no-sandbox -o text` |
+| **Cold start** | Slow first call; sensitive to concurrency (see "Common agy Failure Modes"). | Faster, but 3.x can return intermittent empty (#24290). |
+| **Best for** | The default Google opinion — runs your best account-tier model with zero config. | When you need a **specific** model, `@path` file context, or output-format control; and after the 2026-06-18 Gemini free-tier sunset, when `agy` is unavailable. |
+
+**Decision rule (this is what the probe encodes):**
+
+1. If `bt_agy_available=true` → use **agy**. It runs your best account-tier model and needs no model id.
+2. Else if `bt_gemini_available=true` → use **gemini** with `$bt_gemini_model` (newest-best, currently `gemini-3.1-pro-preview`).
+3. Else → skip the Google AI slot and note the gap.
+
+Never run both agy and gemini for the same query — they're the same vendor's models and would double-count one voice.
+
+> **Model note (verified by dogfooding, 2026-06):** on a current Google account, `gemini-3.1-pro-preview` and `gemini-3-flash-preview` were **2/2 reliable**, while `gemini-2.5-pro` was only **1/2** (one call timed out). That's why the probe now tries **3.1-pro-preview first** and treats 2.5-pro as a fallback — the reverse of older guidance. Re-verify periodically; model reliability shifts with account tier and capacity.
+
 ### Model Discovery (Run Once Per Session)
 
 **Model names change frequently.** Instead of hardcoding model IDs, run this probe at the start of each braintrust session to discover the best available models for each CLI. Cache the results in `/tmp/bt_models.env` and source them for all subsequent calls.
@@ -183,88 +247,97 @@ All Gemini examples in this file assume these flags. When you see a short exampl
 ```bash
 cat > /tmp/bt_probe.sh << 'PROBE'
 #!/bin/bash
-# Braintrust model probe - discovers best available model for each CLI
-# Tries models in priority order (best first), picks the first that responds
+# Braintrust model probe - discovers installed + AUTHENTICATED CLIs and best models.
+#
+# Design (this is what fixes the agy<->gemini "thrashing"):
+#  * Runs all four CLI checks in PARALLEL, so a slow/cold CLI never blocks the others.
+#  * Per CLI: attempt 1 absorbs cold start; a *fast empty* (exit != 124) triggers ONE
+#    warm-up retry, but a *timeout* (exit 124) is treated as down (no retry) to bound time.
+#  * Gemini tries newest-best FIRST (gemini-3.1-pro-preview), 2.5-pro only as fallback.
+# Typical run ~25-45s; worst case ~one timeout window. Cache to /tmp/bt_models.env.
 
-echo "--- Braintrust Model Probe ---"
+echo "--- Braintrust Model Probe (parallel) ---"
+D=$(mktemp -d "${TMPDIR:-/tmp}/bt_probe.XXXXXX")
 
-# Use timeout if available, otherwise run without it
-if command -v timeout &>/dev/null; then
-  TIMEOUT_CMD="timeout"
-elif command -v gtimeout &>/dev/null; then
-  TIMEOUT_CMD="gtimeout"
-else
-  TIMEOUT_CMD=""
-fi
-run_with_timeout() { if [ -n "$TIMEOUT_CMD" ]; then $TIMEOUT_CMD "$@"; else shift; "$@"; fi; }
+if command -v timeout &>/dev/null; then TO="timeout"
+elif command -v gtimeout &>/dev/null; then TO="gtimeout"
+else TO=""; fi
+rt() { if [ -n "$TO" ]; then $TO "$@"; else shift; "$@"; fi; }   # exit 124 == timed out
 
-# --- Antigravity CLI (agy) - primary Google AI path ---
-bt_agy_available="false"
-if command -v agy &>/dev/null; then
-  agy_result=$(run_with_timeout 20 agy --print "say ok" --dangerously-skip-permissions 2>/dev/null | head -5)
-  if [ -n "$agy_result" ]; then
-    bt_agy_available="true"
-    echo "Antigravity (agy): available"
-  else
-    echo "Antigravity (agy): CLI found but returned empty response"
-  fi
-else
-  echo "Antigravity (agy): not installed (install: curl -fsSL https://antigravity.google/cli/install.sh | bash)"
-fi
-
-# --- Gemini - fallback / power-user path (explicit model selection, @path context) ---
-bt_gemini_model=""
-bt_gemini_fast=""
-bt_gemini_available="false"
-if command -v gemini &>/dev/null; then
-  gemini_probe() {
-    run_with_timeout 20 gemini -p "say ok" -m "$1" --approval-mode yolo --no-sandbox -o text 2>/dev/null | grep -qi "ok"
-  }
-  # Order: gemini-2.5-pro first (stable), then 3.1-pro-preview (flaky: upstream bug #24290
-  # causes empty responses, and availability is inconsistent with 429s on many auth tiers)
-  for m in "gemini-2.5-pro" "gemini-3.1-pro-preview"; do
-    if gemini_probe "$m"; then bt_gemini_model="$m"; break; fi
+# --- Antigravity CLI (agy) - PRIMARY Google AI path (no -m; account-tier model) ---
+probe_agy() {
+  echo "bt_agy_available=false" > "$D/agy.env"
+  command -v agy &>/dev/null || { echo "Antigravity (agy): not installed" > "$D/agy.log"; return; }
+  local out rc
+  for a in 1 2; do
+    out=$(rt 50 agy --print "Reply with the single word: ok" --dangerously-skip-permissions 2>/dev/null | head -5); rc=${PIPESTATUS[0]}
+    [ -n "$out" ] && { echo "bt_agy_available=true" > "$D/agy.env"; break; }
+    [ "$rc" = "124" ] && break   # timed out -> treat as down, don't retry
   done
-  for m in "gemini-2.5-flash" "gemini-3-flash-preview"; do
-    if gemini_probe "$m"; then bt_gemini_fast="$m"; break; fi
+  grep -q true "$D/agy.env" && echo "Antigravity (agy): available [PRIMARY Google AI]" > "$D/agy.log" \
+    || echo "Antigravity (agy): empty/timeout after warm-up retry -> using gemini fallback" > "$D/agy.log"
+}
+
+# --- Gemini - FALLBACK Google AI path. Newest-best first; retry-on-empty per model. ---
+probe_gemini() {
+  printf 'bt_gemini_available=false\nbt_gemini_model=\nbt_gemini_fast=\n' > "$D/gemini.env"
+  command -v gemini &>/dev/null || { echo "Gemini: not installed" > "$D/gemini.log"; return; }
+  gp() { local m="$1" o rc; for a in 1 2; do o=$(rt 45 gemini -p "Reply with the single word: ok" -m "$m" --approval-mode yolo --no-sandbox -o text 2>/dev/null); rc=$?; echo "$o" | grep -qi ok && return 0; [ "$rc" = "124" ] && return 1; done; return 1; }
+  local model="" fast=""
+  for m in gemini-3.1-pro-preview gemini-2.5-pro; do gp "$m" && { model="$m"; break; }; done
+  for m in gemini-3-flash-preview gemini-2.5-flash; do gp "$m" && { fast="$m"; break; }; done
+  if [ -n "$model" ]; then
+    printf 'bt_gemini_available=true\nbt_gemini_model=%s\nbt_gemini_fast=%s\n' "$model" "$fast" > "$D/gemini.env"
+    echo "Gemini: $model (fast: $fast) [fallback]" > "$D/gemini.log"
+  else
+    echo "Gemini: found but no models responded" > "$D/gemini.log"
+  fi
+}
+
+# --- Codex (loads MCP servers + skills on every exec; allow for slow cold start) ---
+probe_codex() {
+  echo "bt_codex_available=false" > "$D/codex.env"
+  command -v codex &>/dev/null || { echo "Codex: not installed" > "$D/codex.log"; return; }
+  local out rc
+  for a in 1 2; do
+    out=$(rt 60 codex exec --ephemeral -s read-only --json --skip-git-repo-check "Reply with the single word: ok" < /dev/null 2>/dev/null | jq -rs 'map(select(.item.type? == "agent_message")) | last | .item.text' 2>/dev/null); rc=${PIPESTATUS[0]}
+    [ -n "$out" ] && [ "$out" != "null" ] && { echo "bt_codex_available=true" > "$D/codex.env"; break; }
+    [ "$rc" = "124" ] && break
   done
-  if [ -n "$bt_gemini_model" ]; then
-    bt_gemini_available="true"
-    echo "Gemini: $bt_gemini_model (fast: $bt_gemini_fast) [fallback / explicit model selection]"
-  else
-    echo "Gemini: CLI found but no models responded"
-  fi
-else
-  echo "Gemini: not installed"
-fi
+  grep -q true "$D/codex.env" && echo "Codex: available" > "$D/codex.log" || echo "Codex: empty/timeout after warm-up retry" > "$D/codex.log"
+}
 
-# --- Codex ---
-bt_codex_available="false"
-if command -v codex &>/dev/null; then
-  codex_result=$(run_with_timeout 30 codex exec --ephemeral -s read-only --json --skip-git-repo-check "Say ok" < /dev/null 2>/dev/null | jq -rs 'map(select(.item.type? == "agent_message")) | last | .item.text' 2>/dev/null)
-  if [ -n "$codex_result" ] && [ "$codex_result" != "null" ]; then
-    bt_codex_available="true"
-    echo "Codex: available"
-  else
-    echo "Codex: CLI found but returned empty response"
-  fi
-else
-  echo "Codex: CLI not installed"
-fi
+# --- Grok (Grok Build / Grok 4.3; grok-build needs a Grok subscription) ---
+probe_grok() {
+  printf 'bt_grok_available=false\nbt_grok_model=grok-build\nbt_grok_fast=grok-composer-2.5-fast\n' > "$D/grok.env"
+  command -v grok &>/dev/null || { echo "Grok: not installed" > "$D/grok.log"; return; }
+  local out rc
+  for a in 1 2; do
+    out=$(rt 50 grok -p "Reply with the single word: ok" -m grok-build --output-format json 2>/dev/null | jq -r '.text' 2>/dev/null); rc=${PIPESTATUS[0]}
+    [ -n "$out" ] && [ "$out" != "null" ] && { printf 'bt_grok_available=true\nbt_grok_model=grok-build\nbt_grok_fast=grok-composer-2.5-fast\n' > "$D/grok.env"; break; }
+    [ "$rc" = "124" ] && break
+  done
+  grep -q "bt_grok_available=true" "$D/grok.env" && echo "Grok: available (grok-build = Grok 4.3)" > "$D/grok.log" || echo "Grok: empty/unauthenticated (run: grok login)" > "$D/grok.log"
+}
 
-# --- Claude (from Claude Code) ---
-# Always available via Task tool when running in Claude Code. No probe needed.
-echo "Claude: available (via Task tool)"
+probe_agy & probe_gemini & probe_codex & probe_grok &
+wait
 
-# Write results
+cat "$D"/agy.log "$D"/gemini.log "$D"/codex.log "$D"/grok.log 2>/dev/null
+echo "Claude: available (via Task tool)"   # always available via Task tool from Claude Code
+
+set -a; . "$D/agy.env"; . "$D/gemini.env"; . "$D/codex.env"; . "$D/grok.env"; set +a
 cat > /tmp/bt_models.env << EOF
-bt_gemini_model=${bt_gemini_model:-gemini-2.5-pro}
-bt_gemini_fast=${bt_gemini_fast:-gemini-2.5-flash}
-bt_gemini_available=${bt_gemini_available}
-bt_agy_available=${bt_agy_available}
-bt_codex_available=${bt_codex_available}
+bt_gemini_model=${bt_gemini_model:-gemini-3.1-pro-preview}
+bt_gemini_fast=${bt_gemini_fast:-gemini-3-flash-preview}
+bt_gemini_available=${bt_gemini_available:-false}
+bt_agy_available=${bt_agy_available:-false}
+bt_codex_available=${bt_codex_available:-false}
+bt_grok_available=${bt_grok_available:-false}
+bt_grok_model=${bt_grok_model:-grok-build}
+bt_grok_fast=${bt_grok_fast:-grok-composer-2.5-fast}
 EOF
-
+rm -rf "$D"
 echo "--- Results cached to /tmp/bt_models.env ---"
 cat /tmp/bt_models.env
 PROBE
@@ -275,17 +348,18 @@ After the probe runs, use the discovered models in all commands:
 
 ```bash
 # Source at the start of each Bash tool call that invokes Gemini or Codex
-source /tmp/bt_models.env 2>/dev/null || bt_gemini_model="gemini-2.5-pro"
+source /tmp/bt_models.env 2>/dev/null || bt_gemini_model="gemini-3.1-pro-preview"
 ```
 
 **Graceful degradation rules:**
-- Primary Google AI path is `agy` (if `bt_agy_available=true`)
-- Fall back to `gemini` only if `bt_agy_available=false` and `bt_gemini_available=true`; note that gemini supports explicit model selection and `@path` context that agy does not
-- If both `bt_agy_available=false` and `bt_gemini_available=false`, skip Google AI entirely and note the gap
-- If `bt_codex_available=false`, skip Codex and note it in the synthesis
-- Claude is always available via the Task tool when running in Claude Code
-- If only one CLI is available, run it alone and note the limited coverage
-- **Never let a single CLI failure block the entire braintrust consultation**
+- **Google AI is one slot.** Use `agy` if `bt_agy_available=true`; fall back to `gemini` (with `$bt_gemini_model`) only if `bt_agy_available=false` and `bt_gemini_available=true`. Never run both for the same query.
+- If both `bt_agy_available=false` and `bt_gemini_available=false`, skip Google AI entirely and note the gap.
+- If `bt_codex_available=false`, skip Codex and note it in the synthesis.
+- If `bt_grok_available=false`, skip Grok and note it (likely not installed or not subscribed — `grok login`).
+- Claude is always available via the Task tool when running in Claude Code.
+- If only one CLI is available, run it alone and note the limited coverage.
+- **Never let a single CLI failure block the entire braintrust consultation.**
+- A single empty/timed-out result is **transient** (especially for agy and gemini 3.x). The probe already retries; at consult time, retry once before declaring a CLI down.
 
 ### Handling Errors During Consultation
 
@@ -293,7 +367,7 @@ Even after the probe, a model can fail mid-consultation (quota, rate limit, tran
 
 ```bash
 # Gemini with error detection and retry
-source /tmp/bt_models.env 2>/dev/null || bt_gemini_model="gemini-2.5-pro"
+source /tmp/bt_models.env 2>/dev/null || bt_gemini_model="gemini-3.1-pro-preview"
 gemini_response=$(timeout 120 gemini -p "$QUERY" -m "$bt_gemini_model" --approval-mode yolo --no-sandbox -o text 2>/dev/null)
 gemini_exit=$?
 if [ $gemini_exit -eq 124 ]; then
@@ -322,9 +396,30 @@ if [ -z "$codex_response" ] || [ "$codex_response" = "null" ]; then
 else
   echo "$codex_response"
 fi
+
+# agy with warm-up retry (transient empties are common; a timeout means cold start)
+agy_response=$(timeout 90 agy --print "$QUERY" --dangerously-skip-permissions 2>/dev/null)
+if [ -z "$agy_response" ]; then
+  agy_response=$(timeout 90 agy --print "$QUERY" --dangerously-skip-permissions 2>/dev/null)  # one retry warms it up
+  [ -z "$agy_response" ] && echo "AGY_FAILED: empty after retry (fall back to gemini)" || echo "$agy_response"
+else
+  echo "$agy_response"
+fi
+
+# Grok with error detection (parse .text; .thought holds reasoning, not the answer)
+source /tmp/bt_models.env 2>/dev/null || bt_grok_model="grok-build"
+grok_exec_out=$(timeout 120 grok -p "$QUERY" -m "$bt_grok_model" --output-format json 2>/dev/null)
+grok_response=$(echo "$grok_exec_out" | jq -r '.text' 2>/dev/null)
+if [ -z "$grok_response" ] || [ "$grok_response" = "null" ]; then
+  echo "GROK_FAILED: empty/unauthenticated (run: grok login; grok-build needs a subscription)"
+else
+  echo "$grok_response"
+fi
 ```
 
 > **Codex blank output fix:** Codex writes skill-loading noise and warnings to stderr. If stderr is not redirected with `2>/dev/null`, it corrupts the JSONL stream and `jq` silently returns nothing. **Always use `2>/dev/null`** when piping Codex output.
+>
+> **Grok parsing:** `--output-format json` returns `{"text": "...", "thought": "...", "stopReason": ...}`. Parse the answer with `jq -r '.text'`. The `plain` format prints the answer directly with no parsing, but `json` is safer for capturing into a variable.
 
 ### Model Fallback Chains
 
@@ -333,10 +428,13 @@ If a model returns an error (404, quota, etc.), fall back to the next model in t
 | CLI | Primary | Fallback 1 | Fallback 2 |
 |-----|---------|------------|------------|
 | **Claude** | `opus` | `sonnet` | `haiku` |
-| **Gemini** | `gemini-2.5-pro` (stable) | `gemini-3.1-pro-preview` (flaky) | N/A |
-| **Gemini (fast)** | `gemini-2.5-flash` (stable) | `gemini-3-flash-preview` | N/A |
+| **Gemini** | `gemini-3.1-pro-preview` (newest-best) | `gemini-2.5-pro` | N/A |
+| **Gemini (fast)** | `gemini-3-flash-preview` | `gemini-2.5-flash` | N/A |
 | **Codex** | (default, currently gpt-5.4) | N/A | N/A |
+| **Grok** | `grok-build` (Grok 4.3) | `grok-composer-2.5-fast` | N/A |
 
+> **Gemini ordering reversed (verified 2026-06):** the probe now tries `gemini-3.1-pro-preview` first. Dogfooding found 3.1-pro-preview and 3-flash-preview were 2/2 reliable on a current account while `gemini-2.5-pro` was 1/2 — so 2.5 is now the fallback, not the primary. The per-model retry-on-empty in the probe handles the intermittent #24290 empty-response case.
+>
 > **Gemini model naming:** All 3.x models require `-preview` suffix. Bare names return 404. The 3.1 generation has Pro and Flash Lite only (no regular Flash). The best fast model is `gemini-3-flash-preview` (3.0 generation). The probe handles fallbacks automatically.
 
 ### Codex Model Aliases
@@ -401,10 +499,10 @@ Auto-applying suggestions defeats the purpose of a second opinion. The user shou
 | **Architecture Review** | Gemini (primary) | 1M context analyzes 40K+ lines holistically; understands how components interact across entire codebase |
 | **Cross-Model Code Review** | Different than author | The model that wrote code has blind spots to its own bugs; fresh eyes catch issues instantly |
 | **System-Wide Bug Investigation** | Gemini + Claude | Gemini for cross-file pattern detection, Claude for detailed fix implementation |
-| **Security Audit** | Parallel all three | Verify auth patterns, SQL injection protection, rate limiting - each model catches different vulnerabilities |
+| **Security Audit** | Parallel, every available CLI | Verify auth patterns, SQL injection protection, rate limiting - each model catches different vulnerabilities |
 | **Design System Extraction** | Gemini (best available) | Analyzes brand elements (colors, fonts, spacing), generates consistent component libraries |
 | **Framework Migration** | Gemini | Side-by-side comparisons (React->Vue, Django->Flask), translates patterns with full context |
-| **Parallel Research** | All three | 3x speed, diverse sources, cross-validate findings |
+| **Parallel Research** | Every available CLI | Speed, diverse sources, cross-validate findings across vendors |
 
 ### Recommended Workflows
 
@@ -430,12 +528,18 @@ Auto-applying suggestions defeats the purpose of a second opinion. The user shou
 Get a second opinion from the braintrust. **Always source the model probe first:**
 
 ```bash
-# Consult Gemini (via Bash tool) - uses probed model
-source /tmp/bt_models.env 2>/dev/null || bt_gemini_model="gemini-2.5-pro"
+source /tmp/bt_models.env 2>/dev/null || { bt_gemini_model="gemini-3.1-pro-preview"; bt_grok_model="grok-build"; }
+
+# Consult the Google AI slot (agy preferred; gemini if agy unavailable) - ONE of these, not both
+agy --print "Review this implementation approach: [CONTEXT]" --dangerously-skip-permissions 2>/dev/null
+# ...or, if bt_agy_available=false:
 timeout 120 gemini -p "Review this implementation approach: [CONTEXT]" -m "$bt_gemini_model" --approval-mode yolo --no-sandbox -o text 2>/dev/null
 
 # Consult Codex (via Bash tool)
 codex exec --ephemeral -s read-only --json --skip-git-repo-check "Review this implementation approach: [CONTEXT]" < /dev/null 2>/dev/null | jq -rs 'map(select(.item.type? == "agent_message")) | last | .item.text'
+
+# Consult Grok (via Bash tool)
+timeout 120 grok -p "Review this implementation approach: [CONTEXT]" -m "$bt_grok_model" --output-format json 2>/dev/null | jq -r '.text'
 
 # Consult Claude (via Task tool, NOT bash)
 # Use Task tool with subagent_type: "general-purpose" and the query as the prompt
@@ -453,7 +557,7 @@ claude -p "Review this implementation approach: [CONTEXT]" --model sonnet --outp
 Gemini shows strong performance on frontend challenges. It thinks in design systems, not individual components:
 
 ```bash
-# All examples below assume: source /tmp/bt_models.env 2>/dev/null || bt_gemini_model="gemini-2.5-pro"
+# All examples below assume: source /tmp/bt_models.env 2>/dev/null || bt_gemini_model="gemini-3.1-pro-preview"
 
 # Review UI component design
 gemini -p "@src/components/ Review the design consistency. Are we following a coherent design system? Check spacing, typography scale, color usage." -m "$bt_gemini_model" -o text 2>/dev/null
@@ -473,7 +577,7 @@ gemini -p "@src/components/ Audit for accessibility: semantic HTML, ARIA attribu
 Gemini has 1M token native context, ideal for whole-codebase work. Testing shows it can analyze 40K+ lines while maintaining architectural understanding:
 
 ```bash
-# All examples below assume: source /tmp/bt_models.env 2>/dev/null || bt_gemini_model="gemini-2.5-pro"
+# All examples below assume: source /tmp/bt_models.env 2>/dev/null || bt_gemini_model="gemini-3.1-pro-preview"
 
 # Analyze entire codebase
 gemini -p "@src/ @lib/ What architectural patterns are used?" -m "$bt_gemini_model" -o text 2>/dev/null
@@ -493,7 +597,7 @@ gemini -p "@src/ Suggest refactoring improvements that require understanding of 
 For the hardest problems, use flagship models:
 
 ```bash
-source /tmp/bt_models.env 2>/dev/null || bt_gemini_model="gemini-2.5-pro"
+source /tmp/bt_models.env 2>/dev/null || bt_gemini_model="gemini-3.1-pro-preview"
 
 # Claude Opus - use Task tool with model: "opus" from Claude Code
 # Or from other CLIs:
@@ -513,7 +617,7 @@ When speed matters more than depth:
 claude -p "[QUERY]" --model haiku --output-format json
 
 # Gemini Flash
-source /tmp/bt_models.env 2>/dev/null || bt_gemini_fast="gemini-2.5-flash"
+source /tmp/bt_models.env 2>/dev/null || bt_gemini_fast="gemini-3-flash-preview"
 gemini -p "[QUERY]" -m "$bt_gemini_fast" --approval-mode yolo --no-sandbox -o text 2>/dev/null
 ```
 
@@ -530,7 +634,7 @@ model: "sonnet"
 
 **Tool call 2** - Bash tool (run_in_background: true):
 ```bash
-source /tmp/bt_models.env 2>/dev/null || bt_gemini_model="gemini-2.5-pro"
+source /tmp/bt_models.env 2>/dev/null || bt_gemini_model="gemini-3.1-pro-preview"
 timeout 120 gemini -p "Research: $TOPIC" -m "$bt_gemini_model" --approval-mode yolo --no-sandbox -o text 2>/dev/null > /tmp/gemini.txt
 ```
 
@@ -572,7 +676,7 @@ IMPORTANT: After your analysis, include a 'Self-Critique' section with 2-3 bulle
 ### Why It Works
 
 In practice:
-- All models (Gemini, Codex, Claude) consistently follow the self-critique instruction
+- All CLIs (agy/Gemini, Codex, Grok, Claude) consistently follow the self-critique instruction
 - The primary analysis tends to be more thorough when self-critique is requested
 - Models surface context dependencies, scope limitations, and assumptions
 
@@ -745,17 +849,20 @@ Use this format to document the full consultation for future reference:
 ## Query
 [The context-packaged prompt sent to all models]
 
-## Gemini
-[Parsed response, or "Model unavailable" / "Model skipped"]
+## Google AI (agy or gemini)
+[Parsed response. Note which path ran, e.g. "agy (account-tier model)" or "gemini-3.1-pro-preview", or "Model unavailable" / "Model skipped"]
 
 ## Codex
 [Parsed response, or "Model unavailable" / "Model skipped"]
+
+## Grok
+[Parsed `.text`, or "Model unavailable" / "Model skipped"]
 
 ## Claude
 [Subagent response, or "Model unavailable" / "Model skipped"]
 
 ## Synthesis
-[Consensus, divergence, and actionable recommendations]
+[Consensus, divergence, and actionable recommendations. Note any CLI that was skipped so the coverage gap is explicit.]
 ```
 
 ## Model Reference
@@ -770,17 +877,17 @@ Use this format to document the full consultation for future reference:
 | **Opus 4.6** | `opus` | 200K | Hardest reasoning problems |
 | **Haiku 4.5** | `haiku` | 200K | Speed, cost efficiency |
 
-### Gemini (as of April 2026)
+### Gemini (as of June 2026)
 
 | Model | Flag Value | Context | Status |
 |-------|-----------|---------|--------|
-| **Gemini 2.5 Pro** | `gemini-2.5-pro` | 1M | **Stable, recommended default.** Probe tries this first. |
-| **Gemini 2.5 Flash** | `gemini-2.5-flash` | 1M | **Stable, recommended fast default.** |
-| **Gemini 3.1 Pro** | `gemini-3.1-pro-preview` | 1M | Preview. Flaky: empty responses (#24290), 429s, retry loops (#23762). Probe fallback only. |
-| **Gemini 3 Flash** | `gemini-3-flash-preview` | 1M | Preview, fast. More reliable than 3.1 Pro but still preview. |
-| **Gemini 3.1 Flash Lite** | `gemini-3.1-flash-lite-preview` | 1M | Preview, cost-efficient |
+| **Gemini 3.1 Pro** | `gemini-3.1-pro-preview` | 1M | **Recommended default.** Probe tries this first. Verified 2/2 reliable on a current account (2026-06). |
+| **Gemini 3 Flash** | `gemini-3-flash-preview` | 1M | **Recommended fast default.** Fast (~9-11s) and reliable. |
+| **Gemini 3.1 Flash Lite** | `gemini-3.1-flash-lite-preview` | 1M | Preview, cost-efficient. |
+| **Gemini 2.5 Pro** | `gemini-2.5-pro` | 1M | Fallback only. Was the old default, but dogfooding found it *less* reliable than 3.1-pro-preview (1/2, one timeout). |
+| **Gemini 2.5 Flash** | `gemini-2.5-flash` | 1M | Stable fast fallback. |
 
-> **Why 2.5 before 3.x?** Gemini 3.x models have an upstream bug (#24290) where the InvalidStreamError retry logic only applies to Gemini 2 models. On 3.x, empty responses happen intermittently and are not retried. Combined with capacity limits (429s) and auth-tier restrictions, 2.5-pro is more reliable for automated consultations. The probe will still discover and use 3.x if it responds successfully.
+> **Why 3.x before 2.5 now?** Older guidance preferred 2.5-pro for stability against the 3.x empty-response bug (#24290). Direct dogfooding in 2026-06 reversed this: on a current account, `gemini-3.1-pro-preview` and `gemini-3-flash-preview` were 2/2 reliable while `gemini-2.5-pro` was 1/2 (one 70s timeout). The probe now tries 3.1-pro-preview first and handles the occasional 3.x empty with a per-model retry. Re-verify periodically — reliability varies by account tier and capacity.
 >
 > **Deprecated:** `gemini-3-pro-preview` was shut down March 9, 2026. Use `gemini-3.1-pro-preview` instead.
 >
@@ -802,6 +909,17 @@ Use this format to document the full consultation for future reference:
 | **GPT-5.3 Codex** | `gpt-5.3-codex` | 192K | Previous default |
 | **GPT-5.3 Codex Spark** | `gpt-5.3-codex-spark` | varies | ChatGPT Pro only (research preview) |
 | Custom | `-m model-name` | varies | Any auth method |
+
+### Grok (Grok Build, as of June 2026)
+
+| Model | Flag Value | Backing Model | Availability |
+|-------|-----------|---------------|--------------|
+| **Grok Build** | `grok-build` (default) | Grok 4.3 | Grok subscription (SuperGrok) or `XAI_API_KEY` |
+| **Grok Composer Fast** | `grok-composer-2.5-fast` | Grok Composer 2.5 | Same auth; faster, lighter |
+
+> **Headless:** `grok -p "$QUERY" -m grok-build --output-format json 2>/dev/null | jq -r '.text'`. Run `grok models` to list what your account can use. Verified: `grok 0.2.14`, `grok-build` answered cleanly in ~5-15s.
+>
+> **Auth:** `grok login` (OAuth via grok.com) or `XAI_API_KEY` from console.x.ai. The default `grok-build` model needs an active Grok subscription; without one you'll hit a "subscription required" gate.
 
 ## Output Parsing
 
@@ -853,6 +971,27 @@ Parse with: `jq -rs 'map(select(.item.type? == "agent_message")) | last | .item.
 codex exec --ephemeral -s read-only --json --skip-git-repo-check "query" -o /tmp/codex-result.txt < /dev/null
 ```
 
+### Grok JSON Output
+
+With `--output-format json`, Grok returns a single JSON object (not a stream):
+```json
+{
+  "text": "the answer here",
+  "stopReason": "EndTurn",
+  "sessionId": "uuid",
+  "requestId": "uuid",
+  "thought": "the model's reasoning (NOT the answer)"
+}
+```
+Parse the answer with: `jq -r '.text'`. **Do not** use `.thought` — that's the reasoning trace.
+
+```bash
+# Capture to variable
+grok_response=$(grok -p "your query" -m grok-build --output-format json 2>/dev/null | jq -r '.text')
+```
+
+**Alternative:** `--output-format plain` (the default) prints the answer text directly to stdout with no parsing, which is fine when you're piping straight to the user. Use `json` + `jq -r '.text'` when capturing into a variable so stray formatting can't leak in.
+
 ## Common Use Cases
 
 > **Note:** All examples below assume the model probe has been run and `source /tmp/bt_models.env` is called at the start of each Bash tool invocation.
@@ -893,7 +1032,7 @@ gemini -p "@src/features/auth/ Review these changes as if you're a senior develo
 
 ### 4. Security Audit (Parallel, from Claude Code)
 
-Run all three in parallel using multiple tool calls:
+Run every available CLI in parallel using multiple tool calls (the Google AI slot is agy *or* gemini, not both):
 
 **Tool call 1** - Task tool (run_in_background: true):
 ```
@@ -930,7 +1069,21 @@ AUDIT_PROMPT="Review this codebase for security vulnerabilities:
 codex exec --ephemeral -s read-only --json --skip-git-repo-check "$AUDIT_PROMPT" < /dev/null 2>/dev/null > /tmp/codex-security.json
 ```
 
-Then collect and compare findings from all three.
+**Tool call 4** - Bash tool (run_in_background: true):
+```bash
+source /tmp/bt_models.env 2>/dev/null || bt_grok_model="grok-build"
+grok -p "Review this codebase for security vulnerabilities:
+1. Authentication/authorization flaws
+2. SQL injection or NoSQL injection
+3. XSS vulnerabilities
+4. CSRF protection
+5. Secrets in code
+6. Rate limiting gaps" -m "$bt_grok_model" --output-format json 2>/dev/null | jq -r '.text' > /tmp/grok-security.txt
+```
+
+> The Google AI leg above uses `gemini`; if `bt_agy_available=true`, replace it with `agy --print "$AUDIT_PROMPT" --dangerously-skip-permissions 2>/dev/null > /tmp/agy-security.txt` instead (one Google voice, not both).
+
+Then collect and compare findings from every CLI that responded.
 
 ### 5. System-Wide Bug Investigation
 
@@ -961,7 +1114,7 @@ gemini -p "@src/ We're considering migrating from React class components to hook
 
 ### 7. Parallel Research (from Claude Code)
 
-Run all three using multiple tool calls in one response:
+Run every available CLI using multiple tool calls in one response:
 
 **Tool call 1** - Task tool (run_in_background: true):
 ```
@@ -980,7 +1133,13 @@ timeout 120 gemini -p "Research: best practices for implementing rate limiting i
 codex exec --ephemeral -s read-only --json --skip-git-repo-check "Research: best practices for implementing rate limiting in Node.js APIs" < /dev/null 2>/dev/null > /tmp/codex.json
 ```
 
-Then synthesize findings from all three sources.
+**Tool call 4** - Bash tool (run_in_background: true):
+```bash
+source /tmp/bt_models.env 2>/dev/null || bt_grok_model="grok-build"
+timeout 120 grok -p "Research: best practices for implementing rate limiting in Node.js APIs" -m "$bt_grok_model" --output-format json 2>/dev/null | jq -r '.text' > /tmp/grok.txt
+```
+
+Then synthesize findings from every source that responded. (Swap Tool call 2 for `agy --print ... 2>/dev/null > /tmp/gemini.txt` when `bt_agy_available=true`.)
 
 ## Key Flags Reference
 
@@ -1037,7 +1196,7 @@ Then synthesize findings from all three sources.
 | `--add-dir` | Add a directory to the workspace (repeatable) |
 | `--prompt-interactive` / `-i` | Run initial prompt then continue interactively |
 
-> **No model selection.** `agy` has no `-m` flag. The model used depends on your Google account tier. It defaults to Gemini 3.5 Flash on free tier, higher models on paid tiers.
+> **No model selection.** `agy` has no `-m` flag. The model used depends on your Antigravity account tier (a high-tier Gemini 3.x on paid Antigravity; a Flash-class model on free). You can't pin a specific model — if you need one, use `gemini -m` instead.
 >
 > **No `@path` file context.** Unlike `gemini`, `agy` does not support `@src/` style file includes in headless mode. Pass file content via stdin or inline in the prompt string.
 >
@@ -1066,6 +1225,28 @@ Then synthesize findings from all three sources.
 | `--dangerously-bypass-approvals-and-sandbox` | Skip all prompts, no sandbox. For externally sandboxed envs only. |
 | `--color` | ANSI color control: always/never/auto |
 
+### Grok (Grok Build)
+| Flag | Purpose |
+|------|---------|
+| `-p, --single` | Single-turn headless prompt. Prints the response and exits (**required** for headless; without it grok opens its TUI) |
+| `--prompt-file <PATH>` | Single-turn prompt read from a file |
+| `--output-format` | `plain` (default), `json`, or `streaming-json`. Use `json` + `jq -r '.text'` when capturing to a variable. |
+| `-m, --model` | Model id: `grok-build` (default, Grok 4.3) or `grok-composer-2.5-fast`. `grok models` lists them. |
+| `--effort` | Effort level: `low`/`medium`/`high`/`xhigh`/`max` |
+| `--reasoning-effort` | Reasoning effort for reasoning models |
+| `--check` | Append a self-verification loop to the prompt (headless only) |
+| `--best-of-n <N>` | Run the task N ways in parallel and pick the best (headless only) |
+| `--disable-web-search` | Disable web search/fetch tools |
+| `--permission-mode` | `default`/`acceptEdits`/`auto`/`dontAsk`/`bypassPermissions`/`plan` |
+| `--always-approve` | Auto-approve all tool executions |
+| `models` (subcommand) | List available models and exit |
+
+> **Headless contract:** `grok -p "$QUERY" -m grok-build --output-format json 2>/dev/null | jq -r '.text'`. Always pass `-p` or grok launches its interactive UI. Parse `.text`, not `.thought` (which is the reasoning trace).
+>
+> **Auth:** `grok login` (OAuth) or `XAI_API_KEY` (console.x.ai). `grok-build` requires a Grok subscription.
+>
+> **Read-only by default:** A bare consultation doesn't edit files. If you ever need write access add `--permission-mode acceptEdits`; for braintrust second opinions, leave it off.
+
 ## Tips
 
 1. **Use Gemini for design & frontend** - Strong performance on UI challenges and design system analysis
@@ -1073,14 +1254,16 @@ Then synthesize findings from all three sources.
 3. **Cross-model review catches bugs** - When a model writes code, it's blind to its own mistakes; different models spot issues instantly
 4. **Use the model probe** - Run the model discovery probe once per session; never hardcode Gemini model names
 5. **Use `-o text` for Gemini** - `-o json` breaks with `maxSessionTurns: 1`. Text output needs no parsing.
-6. **Parallel is fast** - Run all three simultaneously for 3x speed and diverse perspectives
+6. **Parallel is fast** - Run every available CLI simultaneously (up to four voices) for speed and diverse perspectives
 7. **Different models, different blind spots** - Each AI has different training; combined approaches outperform individuals
 8. **Always redirect Gemini stderr** - Use `2>/dev/null` to suppress extension warnings and MCP noise
 9. **Never run `claude -p` from Claude Code** - It will fail. Use the Task tool for the Claude leg of any consultation
 10. **Always close Codex stdin with `< /dev/null`** - Codex `exec "prompt"` reads stdin by default. Without `< /dev/null`, it hangs forever inside Claude Code's Bash tool with "Reading additional input from stdin...". This is the single most common reason Codex "doesn't work" in harnesses.
 11. **Use `codex exec review` for code review** - The dedicated review subcommand auto-reads git diffs; no need to craft review prompts manually
 12. **Always use `--ephemeral -s read-only` for Codex** - Braintrust consultations are stateless and read-only. Only switch to `-s workspace-write` when the user explicitly asks Codex to make changes.
-13. **Never auto-fix review findings** - Present findings and let the user decide what to act on
+13. **Always pass `-p` to Grok** - Without it, grok opens its interactive TUI instead of answering headlessly. Parse `.text` (not `.thought`) from `--output-format json`.
+14. **agy is one warm-up away** - A single empty/slow agy call is transient (cold start or a relay hiccup, not a rate limit). Retry once before falling back to gemini; don't let it flip the Google AI slot.
+15. **Never auto-fix review findings** - Present findings and let the user decide what to act on
 
 ## Further Reading
 

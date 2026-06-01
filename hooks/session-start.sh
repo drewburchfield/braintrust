@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
 #
 # SessionStart hook: Check AI CLI availability
-# Reports which CLIs (gemini, codex, claude) are installed so Claude
+# Reports which CLIs (gemini, agy, codex, grok, claude) are installed so Claude
 # knows what tools are available before the user asks.
+#
+# Note: this only checks that the binary is on PATH (command -v). Authentication
+# and cold-start liveness are verified separately by the model probe in SKILL.md.
 #
 
 # Consume hook input from stdin
@@ -24,6 +27,7 @@ check_cli() {
 check_cli "gemini" "install with: npm install -g @google/gemini-cli or see https://github.com/google-gemini/gemini-cli"
 check_cli "agy" "install with: curl -fsSL https://antigravity.google/cli/install.sh | bash (Google Antigravity CLI - replaces gemini free-tier after 2026-06-18)"
 check_cli "codex" "install with: npm install -g @openai/codex"
+check_cli "grok" "install with: curl -fsSL https://x.ai/cli/install.sh | bash (Grok Build / Grok 4.3 - needs a Grok subscription; auth with: grok login)"
 check_cli "claude" "install with: npm install -g @anthropic-ai/claude-code"
 
 # Join results with comma separator

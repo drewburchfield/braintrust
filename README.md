@@ -12,7 +12,15 @@ A [Claude Code](https://docs.anthropic.com/en/docs/claude-code) plugin from the 
 
 Delegates tasks to other AI CLIs running in parallel. Get second opinions on architecture decisions, offload research to models with larger context windows, or run design reviews across multiple models simultaneously.
 
-Supports three CLIs as braintrust members: **Antigravity CLI (agy)**, **Codex**, and **Claude** (via Task tool subagent). Gemini CLI is also supported as a power-user fallback with explicit model selection and `@path` file context.
+Braintrust members (consulted in parallel, gated by what's installed and authenticated):
+
+- **Antigravity CLI (agy)** — primary Google AI path (runs your Antigravity account-tier Gemini model)
+- **Gemini CLI** — fallback Google AI path with explicit model selection (`-m`) and `@path` file context
+- **Codex** — GPT-5.x
+- **Grok Build (grok)** — Grok 4.3, a distinct xAI opinion set
+- **Claude** — via Task tool subagent
+
+agy and Gemini share one "Google AI" slot (agy preferred); the others each contribute an independent opinion, so a full consult is up to four parallel voices.
 
 ## Commands
 
@@ -24,25 +32,30 @@ Supports three CLIs as braintrust members: **Antigravity CLI (agy)**, **Codex**,
 ## Use Cases
 
 - Get second opinions from different models simultaneously
-- Cross-model code review (Codex `exec review` or parallel all three)
+- Cross-model code review (Codex `exec review` or parallel across every available CLI)
 - Validate architecture decisions
 - Parallel research across multiple models
 - Security audits with diverse model perspectives
 - Offload large-context work to Google AI (agy / gemini 1M context)
 
-## v2.0.0 Highlights
+## v1.6.0 Highlights
 
-- **Antigravity CLI (agy)** is now the primary Google AI path. `gemini` is retained as a fallback for users who need explicit model selection or `@path` file context.
-- **`--no-sandbox`** replaces `--sandbox=none` for Gemini CLI (correct boolean flag form).
-- **Session probe** now checks `agy` first, then `gemini`, and caches `bt_agy_available` alongside existing env vars.
-- **June 18, 2026 sunset**: Gemini CLI free-tier/OAuth access ends. The probe handles the switch automatically.
+- **Grok Build (Grok 4.3)** added as a first-class braintrust member. Headless: `grok -p "..." -m grok-build --output-format json | jq -r '.text'`.
+- **Default consult is now "every installed + authenticated CLI"** (up to four voices), not a fixed three.
+- **Reliability fix for agy ↔ gemini "thrashing"**: the model probe now uses generous cold-start timeouts and a warm-up retry per CLI, so a slow first call no longer false-negatives a CLI and silently flips the Google AI path.
+- **Gemini default model is now `gemini-3.1-pro-preview`** (newest-best first). Dogfooding showed `gemini-2.5-pro` was actually the *flakier* model on current accounts; it is now a fallback only.
+- **agy vs Gemini model paths documented**: agy has no `-m` flag and runs your account-tier model; Gemini lets you pick the exact model. They are different access paths, not interchangeable.
+- **June 18, 2026 sunset**: Gemini CLI free-tier/OAuth access ends. agy is the primary path; the probe handles the switch automatically.
 
 ## Requirements
 
-- [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code)
-- [Antigravity CLI (agy)](https://antigravity.google/product/antigravity-cli) — `curl -fsSL https://antigravity.google/cli/install.sh | bash`
+All CLIs are optional; braintrust consults whichever are installed and authenticated.
+
+- [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) — always available as a subagent from Claude Code
+- [Antigravity CLI (agy)](https://antigravity.google/product/antigravity-cli) — `curl -fsSL https://antigravity.google/cli/install.sh | bash` (primary Google AI path)
 - [Codex CLI](https://github.com/openai/codex)
-- [Gemini CLI](https://github.com/google-gemini/gemini-cli) *(optional — power-user fallback; free-tier sunset 2026-06-18)*
+- [Grok Build (grok)](https://x.ai) — `curl -fsSL https://x.ai/cli/install.sh | bash`, then `grok login` *(needs a Grok subscription for `grok-build`)*
+- [Gemini CLI](https://github.com/google-gemini/gemini-cli) *(power-user fallback for explicit model selection / `@path`; free-tier sunset 2026-06-18)*
 
 ## Install
 

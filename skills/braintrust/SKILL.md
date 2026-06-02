@@ -23,11 +23,13 @@ Membership is decided by availability, not by your judgement: if a CLI is instal
 
 1. **Claude** (always available from Claude Code): Use the Task tool with `subagent_type: "general-purpose"` and `run_in_background: true`
 2. **Google AI** — use exactly one path, in this priority order:
-   - **Antigravity/agy** (if `bt_agy_available=true`): Use the Bash tool with `run_in_background: true`:
+   - **Antigravity/agy** (if `bt_agy_available=true`): Use the Bash tool with `run_in_background: true`. **agy must be wrapped in a PTY** (the probe writes `/tmp/bt_agy_pty.py`):
      ```bash
-     agy --print "$QUERY" --dangerously-skip-permissions 2>/dev/null
+     python3 /tmp/bt_agy_pty.py 120 agy --print "$QUERY" --dangerously-skip-permissions
      ```
-     > **agy note:** No `-m` model flag (runs your Antigravity account-tier model). No `@path` file context — inline file content in the prompt or pipe via stdin. No output format control. Cold start can take 30-60s; give it time.
+     > **Why the wrapper (REQUIRED):** `agy --print` only flushes its answer to stdout when stdout is a real TTY. As a subprocess (pipe/redirect), the model round-trip completes but stdout stays empty: on macOS this is an indefinite hang, on Windows/Linux an instant empty exit-0. This is upstream bug [antigravity-cli#76](https://github.com/google-antigravity/antigravity-cli/issues/76), open as of agy 1.0.4. The PTY wrapper gives agy a pseudo-terminal so it flushes, strips ANSI, and enforces a real timeout (agy's own `--print-timeout` is non-functional). See "Common Antigravity (agy) Failure Modes". The wrapper exits 0 with the answer, 124 on timeout, 1 on empty.
+     >
+     > **agy note:** No `-m` model flag (runs your Antigravity account-tier model). No `@path` file context (inline file content in the prompt). No output format control.
    - **Gemini** (only if `bt_agy_available=false` and `bt_gemini_available=true`): Use the Bash tool with `run_in_background: true`:
      ```bash
      source /tmp/bt_models.env 2>/dev/null || bt_gemini_model="gemini-3.1-pro-preview"
@@ -113,7 +115,7 @@ This means **every installed model is reachable** regardless of which harness yo
 # Diagnostic health checks (only run if needed)
 # Note: Claude health check must run outside Claude Code (nested sessions blocked)
 source /tmp/bt_models.env 2>/dev/null || { bt_gemini_fast="gemini-3-flash-preview"; bt_grok_model="grok-build"; bt_codex_home="/tmp/bt-codex-home"; }
-agy --print "say ok" --print-timeout 80s --dangerously-skip-permissions 2>/dev/null | grep -qi "ok" && echo "agy: OK" || echo "agy: FAILED (cold start -> retry once; repeated rc=124 = hard hang, treat as down)"
+python3 /tmp/bt_agy_pty.py 60 agy --print "say ok" --dangerously-skip-permissions 2>/dev/null | grep -qi "ok" && echo "agy: OK" || echo "agy: FAILED (antigravity-cli#76; needs the PTY wrapper -> if still failing, fall back to gemini)"
 gemini -p "say ok" -m "$bt_gemini_fast" --approval-mode yolo --no-sandbox -o text 2>/dev/null | grep -qi "ok" && echo "Gemini: OK" || echo "Gemini: FAILED"
 CODEX_HOME="${bt_codex_home:-/tmp/bt-codex-home}" codex exec --ephemeral -s read-only --json --skip-git-repo-check -C "${TMPDIR:-/tmp}" "test" < /dev/null 2>/dev/null | head -5 && echo "Codex: OK" || echo "Codex: FAILED"
 grok -p "say ok" -m "$bt_grok_model" --output-format json 2>/dev/null | jq -r 'select(.type!="error") | .text' | grep -qi "ok" && echo "Grok: OK" || echo "Grok: FAILED (parse .message for the real cause: 'out of credits/spending-limit' = billing, not login)"
@@ -203,17 +205,99 @@ If Gemini fails, check these in order:
 
 ### Common Antigravity (agy) Failure Modes
 
-agy is a VS Code-fork-based CLI: `agy --print` spins up a headless Antigravity editor-agent backend that talks to a relay. It is **reliable warm (~4-5s)**, but it has two *distinct* failure shapes that look identical if you discard stderr and the exit code: a recoverable **cold start**, and a non-recoverable **hard hang**. Capture the exit code to tell them apart.
+**Root cause of the agy "hang": a known upstream bug.** `agy --print` renders its answer through a TUI drip renderer that is gated on `isatty(stdout)`. When stdout is **not** a real terminal (a pipe, a redirect, or a subprocess, which is exactly how braintrust calls it), the model round-trip completes but **the answer is never written to stdout**. The response is real: agy's own log shows `text_drip.go: Drip stopped: length=N` matching the answer, and it is even persisted to disk. Only the stdout writeback is skipped. This is upstream issue [`google-antigravity/antigravity-cli#76`](https://github.com/google-antigravity/antigravity-cli/issues/76), **open** and reproduced on agy 1.0.0 through **1.0.4**.
+
+Failure shape is platform-dependent:
+- **macOS (indefinite hang → `rc=124`):** first `-p` call after idle returns (~7s); every subsequent call hangs until killed. Verified locally on agy 1.0.4: bare call `rc=124`, empty log save for `Raising signal 15`.
+- **Windows / Linux (instant empty):** `exit 0`, 0 bytes, ~6s.
+
+**`--print-timeout` does NOT bound the hang** (confirmed upstream and locally). The external `timeout`/wrapper is the only real bound. `--output-format`/`--json` do not exist.
+
+**The fix braintrust uses: run agy under a PTY wrapper.** Giving agy a pseudo-terminal makes `isatty(stdout)` true, so it flushes normally. The probe writes this wrapper to `/tmp/bt_agy_pty.py`; every agy consult goes through it:
+
+```bash
+# Written once by the probe (or run this block standalone before consulting agy).
+cat > /tmp/bt_agy_pty.py << 'PY'
+#!/usr/bin/env python3
+# braintrust agy PTY wrapper: works around antigravity-cli#76 (agy --print only
+# flushes stdout to a real TTY). Allocates a pseudo-terminal so isatty(stdout) is
+# true, strips ANSI, and enforces a REAL external timeout (agy's --print-timeout
+# is non-functional). Pure stdlib.
+# Usage: bt_agy_pty.py <timeout_s> agy --print "<prompt>" --dangerously-skip-permissions
+# Exit:  0 = response captured | 124 = timed out | 1 = empty/other failure
+import os, pty, select, subprocess, sys, time, re, struct, fcntl, termios
+if len(sys.argv) < 3:
+    sys.stderr.write("usage: bt_agy_pty.py <timeout_s> <cmd...>\n"); sys.exit(2)
+deadline = float(sys.argv[1]); cmd = sys.argv[2:]
+master, slave = pty.openpty()
+try:
+    fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 60, 220, 0, 0))
+except Exception:
+    pass
+p = subprocess.Popen(cmd, stdin=slave, stdout=slave, stderr=slave, close_fds=True)
+os.close(slave)
+buf = bytearray(); start = time.time(); timed_out = False
+while True:
+    if time.time() - start > deadline:
+        p.kill(); timed_out = True; break
+    r, _, _ = select.select([master], [], [], 1.0)
+    if master in r:
+        try:
+            data = os.read(master, 65536)
+        except OSError:
+            break
+        if not data:
+            break
+        buf += data
+    if p.poll() is not None:
+        try:
+            while True:
+                rr, _, _ = select.select([master], [], [], 0.2)
+                if master not in rr:
+                    break
+                d = os.read(master, 65536)
+                if not d:
+                    break
+                buf += d
+        except OSError:
+            pass
+        break
+try:
+    p.wait(timeout=5)
+except Exception:
+    pass
+raw = buf.decode("utf-8", "replace")
+raw = re.sub(r"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)", "", raw)
+raw = re.sub(r"\x1b\[[0-9;?]*[ -/]*[@-~]", "", raw)
+raw = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", "", raw).replace("\r", "")
+clean = raw.strip()
+sys.stderr.write(f"[agy-pty] rc={p.poll()} timed_out={timed_out} rawbytes={len(buf)} clean={len(clean)}\n")
+if timed_out:
+    sys.exit(124)
+if not clean:
+    sys.exit(1)
+sys.stdout.write(clean + "\n")
+sys.exit(0)
+PY
+# macOS: warm the keychain to avoid the 1s keyringAuth timeout (antigravity-cli#51)
+security find-generic-password -s "Antigravity Safe Storage" >/dev/null 2>&1 || true
+# Consult agy through the wrapper (120s is the REAL bound):
+python3 /tmp/bt_agy_pty.py 120 agy --print "$QUERY" --dangerously-skip-permissions
+```
 
 | Symptom | Cause | Fix |
 |---------|-------|-----|
-| Times out on the **first** call, fast (~5s) on the next | **Cold start.** The first agy invocation spins up the editor-agent backend. | Give it a generous timeout plus **one** retry. **This is the #1 cause of agy↔gemini "thrashing":** a short-timeout false-negative marks agy unavailable, silently flips the Google AI slot to gemini, then the next session agy is warm and wins again. |
-| Empty stdout, **`rc=124` on every attempt** (no stderr, no error) | **Hard hang, not transient.** agy's own `--print-timeout` defaults to **5m**, so an external `timeout 90` kills it with zero output and zero stderr before agy ever reports anything. Retrying does **not** recover it. Observed directly: 3 consecutive empties, all `rc=124`. | Do **not** keep retrying. Set an explicit short `--print-timeout` (e.g. `--print-timeout 80s`) so agy fails fast with its own diagnostics instead of being silently killed, capture stderr to a file, and after **one** failed retry treat agy as **down** for this consult and fall back to gemini. agy has no clean-profile/home flag, so isolation is not available; best-effort only. |
-| Empty stdout, **exit 0** | Genuine transient relay hiccup (rare). | Retry once. The next call usually succeeds. |
+| Empty stdout / `rc=124` hang when piped or captured | **antigravity-cli#76**: `--print` only flushes to a TTY. | **Use the PTY wrapper above.** Verified: bare call hangs `rc=124`; wrapped call returns a full review in ~5-7s. |
+| Wrapper itself returns `rc=124` | agy hung even under the PTY (e.g. subsequent-call hang or quota), or genuinely slow. | Retry **once**; if it times out again, treat agy as **down** and fall back to gemini. Don't loop. |
+| Wrapper returns `rc=1` (empty) | Quota exhaustion surfaces as a silent empty response (antigravity-cli#56), or auth dropped. | Note the gap, fall back to gemini. Repeated empties = quota; stop calling agy this session. |
+| Repeated OAuth prompts on macOS even when logged in | `keyringAuth: timed out after 1s` (antigravity-cli#51). | The wrapper block warms the keychain first (`security find-generic-password -s "Antigravity Safe Storage"`), which substantially reduces it. |
 | No model control | agy has **no `-m` flag** by design. It runs your Antigravity account-tier model. | If you need a specific model, use `gemini -m` instead. See "agy vs Gemini: Two Different Model Paths". |
-| Won't report its own model name | agy returns empty for "what model are you" style identity prompts. | Expected. Don't probe agy with identity questions; use a concrete task prompt. |
 
-> **Practical rule:** distinguish the two by exit code. A first-call timeout that succeeds warm is cold start (retry once). Repeated `rc=124` empties are a hard hang, not "transient": stop retrying, note the gap, and fall back to gemini. Never conclude agy is healthy *or* "just flaky" without reading the exit code.
+> **Windows caveat:** the PTY workaround is verified on **macOS**; on Windows a ConPTY wrapper does **not** help (agy takes a different MCP-loading path that stalls). On Windows, fall back to gemini, or scrape the persisted answer from `~/.gemini/antigravity-cli/brain/<conversation_id>/.system_generated/logs/transcript.jsonl` (id keyed by cwd in `cache/last_conversations.json`).
+>
+> **No clean-profile flag.** Unlike Codex's `CODEX_HOME`, agy exposes no isolated-home env var; its state lives in `~/.gemini/antigravity-cli/`. Isolation is not available for agy.
+>
+> **Revert when fixed:** once antigravity-cli#76 ships a non-TTY stdout flush (or an `--output`/`--json` flag), drop the wrapper and call `agy --print` directly.
 
 ### Common Grok Failure Modes
 
@@ -238,7 +322,7 @@ If Grok fails, check these in order:
 | **Claude** (from Claude Code) | Task tool with `subagent_type: "general-purpose"` | Task tool with `model: "haiku"` |
 | **Claude** (from other CLIs) | `claude -p "query" --model sonnet --output-format json` | `--model haiku` |
 | **Gemini** | Uses `$bt_gemini_model` from model probe (see below) | Uses `$bt_gemini_fast` from model probe |
-| **Antigravity (agy)** | `agy --print "$QUERY" --print-timeout 80s --dangerously-skip-permissions 2>/tmp/bt_agy.err` (**primary** Google AI path) | N/A (no model flag) |
+| **Antigravity (agy)** | `python3 /tmp/bt_agy_pty.py 120 agy --print "$QUERY" --dangerously-skip-permissions` (**primary** Google AI path; PTY-wrapped per antigravity-cli#76) | N/A (no model flag) |
 | **Codex** | `CODEX_HOME="$bt_codex_home" codex exec --ephemeral -s read-only --json --skip-git-repo-check -C "${TMPDIR:-/tmp}" "query" < /dev/null 2>/tmp/bt_codex.err` (isolated clean-slate; see "Codex Isolation") | N/A |
 | **Grok** | `grok -p "query" -m grok-build --output-format json 2>/dev/null \| jq -r '.text'` | `-m grok-composer-2.5-fast` |
 
@@ -316,18 +400,79 @@ mkdir -p "$bt_codex_home"
 printf '# braintrust isolated profile: no memories, no MCP, no global AGENTS.md\n' > "$bt_codex_home/config.toml"
 [ -f "$HOME/.codex/auth.json" ] && cp "$HOME/.codex/auth.json" "$bt_codex_home/auth.json" 2>/dev/null
 
+# --- agy PTY wrapper (works around antigravity-cli#76: --print only flushes to a TTY) ---
+# Written once here; every agy probe/consult runs through it.
+cat > /tmp/bt_agy_pty.py << 'PY'
+#!/usr/bin/env python3
+import os, pty, select, subprocess, sys, time, re, struct, fcntl, termios
+if len(sys.argv) < 3:
+    sys.stderr.write("usage: bt_agy_pty.py <timeout_s> <cmd...>\n"); sys.exit(2)
+deadline = float(sys.argv[1]); cmd = sys.argv[2:]
+master, slave = pty.openpty()
+try:
+    fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 60, 220, 0, 0))
+except Exception:
+    pass
+p = subprocess.Popen(cmd, stdin=slave, stdout=slave, stderr=slave, close_fds=True)
+os.close(slave)
+buf = bytearray(); start = time.time(); timed_out = False
+while True:
+    if time.time() - start > deadline:
+        p.kill(); timed_out = True; break
+    r, _, _ = select.select([master], [], [], 1.0)
+    if master in r:
+        try:
+            data = os.read(master, 65536)
+        except OSError:
+            break
+        if not data:
+            break
+        buf += data
+    if p.poll() is not None:
+        try:
+            while True:
+                rr, _, _ = select.select([master], [], [], 0.2)
+                if master not in rr:
+                    break
+                d = os.read(master, 65536)
+                if not d:
+                    break
+                buf += d
+        except OSError:
+            pass
+        break
+try:
+    p.wait(timeout=5)
+except Exception:
+    pass
+raw = buf.decode("utf-8", "replace")
+raw = re.sub(r"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)", "", raw)
+raw = re.sub(r"\x1b\[[0-9;?]*[ -/]*[@-~]", "", raw)
+raw = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", "", raw).replace("\r", "")
+clean = raw.strip()
+sys.stderr.write(f"[agy-pty] rc={p.poll()} timed_out={timed_out} rawbytes={len(buf)} clean={len(clean)}\n")
+if timed_out:
+    sys.exit(124)
+if not clean:
+    sys.exit(1)
+sys.stdout.write(clean + "\n")
+sys.exit(0)
+PY
+security find-generic-password -s "Antigravity Safe Storage" >/dev/null 2>&1 || true  # macOS keyring warm-up (#51)
+
 # --- Antigravity CLI (agy) - PRIMARY Google AI path (no -m; account-tier model) ---
 probe_agy() {
   echo "bt_agy_available=false" > "$D/agy.env"
   command -v agy &>/dev/null || { echo "Antigravity (agy): not installed" > "$D/agy.log"; return; }
   local out rc
   for a in 1 2; do
-    out=$(rt 50 agy --print "Reply with the single word: ok" --dangerously-skip-permissions 2>/dev/null | head -5); rc=${PIPESTATUS[0]}
-    [ -n "$out" ] && { echo "bt_agy_available=true" > "$D/agy.env"; break; }
-    [ "$rc" = "124" ] && break   # timed out -> treat as down, don't retry
+    # Through the PTY wrapper (antigravity-cli#76): a bare 'agy --print' hangs here.
+    out=$(python3 /tmp/bt_agy_pty.py 60 agy --print "Reply with the single word: ok" --dangerously-skip-permissions 2>/dev/null | head -5); rc=$?
+    echo "$out" | grep -qi ok && { echo "bt_agy_available=true" > "$D/agy.env"; break; }
+    [ "$rc" = "124" ] && break   # wrapper timed out -> treat as down, don't retry
   done
-  grep -q true "$D/agy.env" && echo "Antigravity (agy): available [PRIMARY Google AI]" > "$D/agy.log" \
-    || echo "Antigravity (agy): empty/timeout after warm-up retry -> using gemini fallback" > "$D/agy.log"
+  grep -q true "$D/agy.env" && echo "Antigravity (agy): available [PRIMARY Google AI, PTY-wrapped]" > "$D/agy.log" \
+    || echo "Antigravity (agy): empty/timeout (antigravity-cli#76) -> using gemini fallback" > "$D/agy.log"
 }
 
 # --- Gemini - FALLBACK Google AI path. Newest-best first; retry-on-empty per model. ---
@@ -456,20 +601,19 @@ else
   echo "$codex_response"
 fi
 
-# agy with exit-code-aware retry. Distinguish cold start (retry once) from a hard hang (don't).
-# --print-timeout makes agy fail fast with its own diagnostics instead of being killed silently at the
-# external timeout. agy has no clean-profile flag, so isolation is unavailable -- best-effort only.
-run_agy() { timeout 100 agy --print "$QUERY" --print-timeout 80s --dangerously-skip-permissions 2>/tmp/bt_agy.err; }
-agy_response=$(run_agy); agy_exit=$?
-if [ "$agy_exit" -ne 124 ] && [ -z "$agy_response" ]; then
-  agy_response=$(run_agy); agy_exit=$?   # exit 0 + empty = genuine transient; one warm-up retry
-fi
+# agy through the PTY wrapper (antigravity-cli#76: --print only flushes to a TTY).
+# The wrapper IS the real bound; agy's own --print-timeout is non-functional.
+# Wrapper exit: 0 = answer captured, 124 = timed out, 1 = empty (quota/auth).
+agy_response=$(python3 /tmp/bt_agy_pty.py 120 agy --print "$QUERY" --dangerously-skip-permissions 2>/tmp/bt_agy.err); agy_exit=$?
 if [ "$agy_exit" -eq 124 ]; then
-  echo "AGY_FAILED: hard timeout (rc=124) -- NOT transient, do not keep retrying. Treat as down, fall back to gemini. (stderr: $(tail -1 /tmp/bt_agy.err))"
-elif [ -z "$agy_response" ]; then
-  echo "AGY_FAILED: empty after warm-up retry -> fall back to gemini (stderr: $(tail -1 /tmp/bt_agy.err))"
-else
+  agy_response=$(python3 /tmp/bt_agy_pty.py 120 agy --print "$QUERY" --dangerously-skip-permissions 2>/tmp/bt_agy.err); agy_exit=$?   # one retry, then give up
+fi
+if [ "$agy_exit" -eq 0 ] && [ -n "$agy_response" ]; then
   echo "$agy_response"
+elif [ "$agy_exit" -eq 124 ]; then
+  echo "AGY_FAILED: still hung under PTY after retry (antigravity-cli#76 subsequent-call hang, or quota) -> fall back to gemini ($(tail -1 /tmp/bt_agy.err))"
+else
+  echo "AGY_FAILED: empty response (quota exhaustion #56 or auth) -> fall back to gemini ($(tail -1 /tmp/bt_agy.err))"
 fi
 
 # Grok with error detection. The answer is .text; a failure arrives as {"type":"error","message":...} on stdout.
@@ -601,7 +745,7 @@ Get a second opinion from the braintrust. **Always source the model probe first:
 source /tmp/bt_models.env 2>/dev/null || { bt_gemini_model="gemini-3.1-pro-preview"; bt_grok_model="grok-build"; bt_codex_home="/tmp/bt-codex-home"; }
 
 # Consult the Google AI slot (agy preferred; gemini if agy unavailable) - ONE of these, not both
-agy --print "Review this implementation approach: [CONTEXT]" --print-timeout 80s --dangerously-skip-permissions 2>/tmp/bt_agy.err
+python3 /tmp/bt_agy_pty.py 120 agy --print "Review this implementation approach: [CONTEXT]" --dangerously-skip-permissions
 # ...or, if bt_agy_available=false:
 timeout 120 gemini -p "Review this implementation approach: [CONTEXT]" -m "$bt_gemini_model" --approval-mode yolo --no-sandbox -o text 2>/dev/null
 
@@ -1154,7 +1298,7 @@ grok -p "Review this codebase for security vulnerabilities:
 6. Rate limiting gaps" -m "$bt_grok_model" --output-format json 2>/dev/null | jq -r '.text' > /tmp/grok-security.txt
 ```
 
-> The Google AI leg above uses `gemini`; if `bt_agy_available=true`, replace it with `agy --print "$AUDIT_PROMPT" --dangerously-skip-permissions 2>/dev/null > /tmp/agy-security.txt` instead (one Google voice, not both).
+> The Google AI leg above uses `gemini`; if `bt_agy_available=true`, replace it with `python3 /tmp/bt_agy_pty.py 120 agy --print "$AUDIT_PROMPT" --dangerously-skip-permissions > /tmp/agy-security.txt` instead (PTY-wrapped per antigravity-cli#76; one Google voice, not both).
 
 Then collect and compare findings from every CLI that responded.
 
@@ -1213,7 +1357,7 @@ source /tmp/bt_models.env 2>/dev/null || bt_grok_model="grok-build"
 timeout 120 grok -p "Research: best practices for implementing rate limiting in Node.js APIs" -m "$bt_grok_model" --output-format json 2>/dev/null | jq -r '.text' > /tmp/grok.txt
 ```
 
-Then synthesize findings from every source that responded. (Swap Tool call 2 for `agy --print ... 2>/dev/null > /tmp/gemini.txt` when `bt_agy_available=true`.)
+Then synthesize findings from every source that responded. (Swap Tool call 2 for `python3 /tmp/bt_agy_pty.py 120 agy --print "$TOPIC..." --dangerously-skip-permissions > /tmp/gemini.txt` when `bt_agy_available=true`; PTY-wrapped per antigravity-cli#76.)
 
 ## Key Flags Reference
 
@@ -1262,7 +1406,7 @@ Then synthesize findings from every source that responded. (Swap Tool call 2 for
 | Flag | Purpose |
 |------|---------|
 | `-p, --print, --prompt` | Non-interactive (headless) print mode |
-| `--print-timeout` | Timeout for print mode (default `5m0s`) |
+| `--print-timeout` | Timeout for print mode (default `5m0s`). **Non-functional in non-TTY/headless use** (antigravity-cli#76); use an external bound (the PTY wrapper). |
 | `--dangerously-skip-permissions` | Auto-approve all tool permission requests (replaces `--approval-mode yolo`) |
 | `--sandbox` | Enable sandbox with terminal restrictions (boolean; omit to disable) |
 | `--continue` / `-c` | Continue the most recent conversation |
@@ -1338,7 +1482,7 @@ Then synthesize findings from every source that responded. (Swap Tool call 2 for
 13. **Always run Codex with an isolated `CODEX_HOME`** - `--ephemeral` is NOT a blank slate: Codex still loads `~/.codex` memories, MCP servers, and the global `AGENTS.md`. That contaminates reviews (observed: an off-topic answer pulled from a memory) and biases synthesis. Point `CODEX_HOME` at a clean throwaway profile (the probe builds `$bt_codex_home`) and add `-C` to a scratch dir. `-C /tmp` alone is not enough. See "Codex Isolation".
 14. **Always pass `-p` to Grok** - Without it, grok opens its interactive TUI instead of answering headlessly. Parse `.text` (not `.thought`) from `--output-format json`, and check `.type=="error"` first.
 15. **A Grok `AuthorizationRequired` error is usually billing, not login** - The JSON body says the real cause. `out of credits / spending-limit` means add credits or use an `XAI_API_KEY` with balance; `grok login` will not fix it.
-16. **Tell agy's two failure modes apart by exit code** - A first-call timeout that succeeds warm is cold start (retry once). Repeated `rc=124` empties are a hard hang, not "transient": stop retrying and fall back to gemini. Set `--print-timeout` so agy fails fast instead of being killed silently, and capture stderr to a file.
+16. **Always run agy through the PTY wrapper** - `agy --print` only flushes to a real TTY (antigravity-cli#76), so a bare subprocess call hangs (macOS) or returns empty (Win/Linux). `python3 /tmp/bt_agy_pty.py <timeout> agy --print "$QUERY" --dangerously-skip-permissions` gives it a pseudo-terminal and is the real timeout bound (agy's own `--print-timeout` is ignored). Verified on macOS; on Windows fall back to gemini. The probe writes the wrapper.
 17. **Capture CLI stderr to a file, not `/dev/null`** - `2>/dev/null` is why agy timeouts and grok billing errors get misdiagnosed. Use `2>/tmp/bt_<cli>.err`, check the exit code, and surface the captured error when a response is empty.
 18. **Never auto-fix review findings** - Present findings and let the user decide what to act on
 

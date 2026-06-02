@@ -38,6 +38,13 @@ agy and Gemini share one "Google AI" slot (agy preferred); the others each contr
 - Security audits with diverse model perspectives
 - Offload large-context work to Google AI (agy / gemini 1M context)
 
+## v1.7.1 Highlights
+
+- **agy actually works headless now.** `agy --print` only flushes its answer to a real TTY; as a subprocess it hangs on macOS / returns empty on Win+Linux (upstream bug [antigravity-cli#76](https://github.com/google-antigravity/antigravity-cli/issues/76), open through agy 1.0.4). braintrust now runs agy through a bundled **PTY wrapper** (`/tmp/bt_agy_pty.py`, written by the probe) that gives it a pseudo-terminal, strips ANSI, and enforces a real timeout. Verified: a bare call hangs `rc=124`; the wrapped call returns a full review in ~5-7s, so agy is a live Google AI voice again instead of "always down".
+- **Removed the broken `--print-timeout` guidance** from v1.7.0: agy's own `--print-timeout` is non-functional in headless use, so the external wrapper timeout is the only real bound.
+- **macOS keychain warm-up** added before agy calls to reduce the 1s `keyringAuth` OAuth re-prompt ([antigravity-cli#51](https://github.com/google-antigravity/antigravity-cli/issues/51)).
+- **Windows caveat documented**: the PTY trick does not help on Windows; fall back to gemini or scrape the persisted transcript.
+
 ## v1.7.0 Highlights
 
 - **Codex now runs as a true clean-slate reviewer.** `codex exec --ephemeral` was never a blank slate: it loaded `~/.codex` memories, MCP servers, and the global `AGENTS.md`, which contaminated reviews (observed: a diff review that answered an unrelated project's spec pulled from a memory) and biased synthesis. Every Codex consult now runs against an isolated throwaway `CODEX_HOME` (no memories, no MCP, no global AGENTS.md). This also removes the MCP-boot startup hangs.

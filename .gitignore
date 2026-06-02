@@ -19,6 +19,9 @@ node_modules/
 __pycache__/
 *.pyc
 
+# grok writes a per-project session registry into its cwd (antigravity/grok CLI)
+cache/projects.json
+
 # Build artifacts
 dist/
 build/

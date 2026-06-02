@@ -36,10 +36,15 @@ Membership is decided by availability, not by your judgement: if a CLI is instal
      > **gemini is the power-user path.** Supports explicit model selection (`-m`), `@path` file context, and output format control. Use when `agy` is unavailable or when you need model-level control.
 3. **Codex** (if `bt_codex_available=true`): Use the Bash tool with `run_in_background: true`:
    ```bash
-   codex exec --ephemeral -s read-only --json --skip-git-repo-check "$QUERY" < /dev/null 2>/dev/null > /tmp/codex.json
+   source /tmp/bt_models.env 2>/dev/null
+   CODEX_HOME="${bt_codex_home:-/tmp/bt-codex-home}" codex exec --ephemeral -s read-only --json --skip-git-repo-check -C "${TMPDIR:-/tmp}" "$QUERY" < /dev/null 2>/tmp/bt_codex.err > /tmp/codex.json
    ```
 
-   > **Always include `< /dev/null`.** Codex's `exec "prompt"` reads stdin by default and hangs forever when the harness pipes to it. This is the single most common reason Codex appears broken. See "Common Codex Failure Modes" below.
+   > **Run Codex isolated.** Two non-negotiables, both proven in production failures:
+   > - **`CODEX_HOME="$bt_codex_home"`** points Codex at a clean throwaway profile with no memories, no MCP servers, and no global `~/.codex/AGENTS.md`. Without this, Codex reviews arrive contaminated by prior-session memories (observed: a review that answered a completely unrelated spec) and your global writing-style instructions, which biases the synthesis. The probe builds this profile. See "Codex Isolation: Clean-Slate Reviewer" below.
+   > - **`< /dev/null`** closes stdin. Codex's `exec "prompt"` reads stdin by default and hangs forever when the harness pipes to it.
+   >
+   > Capture stderr to a file (`2>/tmp/bt_codex.err`), not `/dev/null`, so you can read the real error if the run comes back empty. See "Common Codex Failure Modes" below.
 4. **Grok** (if `bt_grok_available=true`): Use the Bash tool with `run_in_background: true`:
    ```bash
    source /tmp/bt_models.env 2>/dev/null || bt_grok_model="grok-build"
@@ -107,11 +112,11 @@ This means **every installed model is reachable** regardless of which harness yo
 ```bash
 # Diagnostic health checks (only run if needed)
 # Note: Claude health check must run outside Claude Code (nested sessions blocked)
-source /tmp/bt_models.env 2>/dev/null || { bt_gemini_fast="gemini-3-flash-preview"; bt_grok_model="grok-build"; }
-agy --print "say ok" --dangerously-skip-permissions 2>/dev/null | grep -qi "ok" && echo "agy: OK" || echo "agy: FAILED (cold start? retry once)"
+source /tmp/bt_models.env 2>/dev/null || { bt_gemini_fast="gemini-3-flash-preview"; bt_grok_model="grok-build"; bt_codex_home="/tmp/bt-codex-home"; }
+agy --print "say ok" --print-timeout 80s --dangerously-skip-permissions 2>/dev/null | grep -qi "ok" && echo "agy: OK" || echo "agy: FAILED (cold start -> retry once; repeated rc=124 = hard hang, treat as down)"
 gemini -p "say ok" -m "$bt_gemini_fast" --approval-mode yolo --no-sandbox -o text 2>/dev/null | grep -qi "ok" && echo "Gemini: OK" || echo "Gemini: FAILED"
-codex exec --ephemeral -s read-only --json --skip-git-repo-check "test" < /dev/null 2>/dev/null | head -5 && echo "Codex: OK" || echo "Codex: FAILED"
-grok -p "say ok" -m "$bt_grok_model" --output-format json 2>/dev/null | jq -r '.text' | grep -qi "ok" && echo "Grok: OK" || echo "Grok: FAILED (run: grok login)"
+CODEX_HOME="${bt_codex_home:-/tmp/bt-codex-home}" codex exec --ephemeral -s read-only --json --skip-git-repo-check -C "${TMPDIR:-/tmp}" "test" < /dev/null 2>/dev/null | head -5 && echo "Codex: OK" || echo "Codex: FAILED"
+grok -p "say ok" -m "$bt_grok_model" --output-format json 2>/dev/null | jq -r 'select(.type!="error") | .text' | grep -qi "ok" && echo "Grok: OK" || echo "Grok: FAILED (parse .message for the real cause: 'out of credits/spending-limit' = billing, not login)"
 ```
 
 When running from Claude Code, Claude itself is always available via the Task tool. No health check needed.
@@ -132,14 +137,50 @@ If Codex fails, check these in order:
 
 | Symptom | Cause | Fix |
 |---------|-------|-----|
+| **Answers an unrelated topic / off-topic review** | **Context contamination.** Codex injects prior-session **memories** (`memories = true` in `~/.codex/config.toml`, globally and per-project), the global `~/.codex/AGENTS.md`, and the repo it's run in. It is **not** a blank slate. Observed: a diff review that instead critiqued a different project's spec pulled from a memory. | **Run with an isolated `CODEX_HOME`** (clean profile: no memories, no MCP, no global AGENTS.md) **and `-C` into a scratch dir.** `-C /tmp` alone is *not* enough; it escapes the repo but leaves memories and global instructions loaded. See "Codex Isolation: Clean-Slate Reviewer". |
 | `You've hit your usage limit` | ChatGPT free/Plus rate limit | Wait for reset or switch to API key auth with `CODEX_API_KEY` |
-| `failed to stat skills entry` (stderr) | Broken symlink in `~/.codex/skills/` | Remove the dead symlink. Non-blocking but noisy. |
-| Hangs on startup | MCP servers in `~/.codex/config.toml` failing to initialize | Check `[mcp_servers]` section. Servers with `required = true` cause immediate exit. Remove or fix broken servers. |
+| `failed to stat skills entry` (stderr) | Broken symlink in `~/.codex/skills/` | Remove the dead symlink. Non-blocking but noisy. (An isolated `CODEX_HOME` avoids it entirely.) |
+| Hangs on startup / silent timeout (`rc=124`) | MCP servers in `~/.codex/config.toml` initialize on **every** `exec` call. Heavy or dead-auth servers (e.g. an expired Granola/Linear token) block startup. Observed: an isolated `-C /tmp` run still timed out because it booted the global MCP servers first. | **Use an isolated `CODEX_HOME`** with no `[mcp_servers]` (see "Codex Isolation"). This is faster *and* removes the hang. |
 | `not a git repository` | Codex requires a git repo by default | Add `--skip-git-repo-check` to exec commands |
-| `missing YAML frontmatter` (stderr) | Codex loading incompatible skill files | Non-blocking stderr noise. Safe to ignore. |
-| Hangs forever with `Reading additional input from stdin...` | Codex `exec "prompt"` reads stdin by default. If the harness pipes anything to stdin (or leaves it open), Codex waits or appends it as a `<stdin>` block. | **Always close stdin with `< /dev/null`.** Example: `codex exec --ephemeral -s read-only --json --skip-git-repo-check "$QUERY" < /dev/null 2>/dev/null`. This is the #1 cause of Codex appearing "broken" inside Claude Code. |
+| `missing YAML frontmatter` (stderr) | Codex loading incompatible skill files | Non-blocking stderr noise. Safe to ignore. (Isolated `CODEX_HOME` avoids it.) |
+| Hangs forever with `Reading additional input from stdin...` | Codex `exec "prompt"` reads stdin by default. If the harness pipes anything to stdin (or leaves it open), Codex waits or appends it as a `<stdin>` block. | **Always close stdin with `< /dev/null`.** Example: `codex exec --ephemeral -s read-only --json --skip-git-repo-check "$QUERY" < /dev/null 2>/tmp/bt_codex.err`. This is the #1 cause of Codex appearing "broken" inside Claude Code. |
 
-**MCP server note:** Codex loads all configured MCP servers on every `exec` call. If you have heavy servers (Playwright, Docker, etc.) in `~/.codex/config.toml`, they add startup latency. For braintrust consultations, Codex doesn't need MCP servers since it's just answering a question.
+### Codex Isolation: Clean-Slate Reviewer
+
+**`codex exec --ephemeral` is not a blank slate.** `--ephemeral` only skips *persisting* the new session. It still loads, on every call:
+
+1. **Memories** — `memories = true` in `~/.codex/config.toml` (global, plus a per-project `[projects."..."]` block). Codex injects what it decided was relevant from past sessions. This is the documented cause of an off-topic review pulling in another project's content, and it silently biases synthesis even when the answer stays on-topic.
+2. **MCP servers** — every server in `[mcp_servers]` boots on each `exec`. Adds latency; a server with expired auth can hang the whole call to a `rc=124` timeout.
+3. **Global instructions** — `~/.codex/AGENTS.md` (writing voice, "confirm before large changes", etc.) leaks personal preferences into a neutral peer review.
+
+For an unbiased fourth opinion, none of that belongs. The fix is a throwaway `CODEX_HOME` that reuses only your auth:
+
+```bash
+# Build once per session (the model probe does this and exports $bt_codex_home).
+bt_codex_home="${TMPDIR:-/tmp}/bt-codex-home"
+mkdir -p "$bt_codex_home"
+printf '# braintrust isolated profile: no memories, no MCP, no global AGENTS.md\n' > "$bt_codex_home/config.toml"
+[ -f "$HOME/.codex/auth.json" ] && cp "$HOME/.codex/auth.json" "$bt_codex_home/auth.json"
+
+# Every Codex consult then runs against the clean profile, from a scratch cwd:
+CODEX_HOME="$bt_codex_home" codex exec --ephemeral -s read-only --json --skip-git-repo-check \
+  -C "${TMPDIR:-/tmp}" "$QUERY" < /dev/null 2>/tmp/bt_codex.err > /tmp/codex.json
+```
+
+Verified clean-slate behavior: with this profile, asking Codex to enumerate any pre-loaded context returns `CLEAN SLATE`, and the call finishes in ~13s with no MCP boot. Without it, the same prompt drags in memories and MCP servers.
+
+> **`-C /tmp` is necessary but not sufficient.** Changing the working directory stops Codex reading the *repo* you're in, but `CODEX_HOME` is what strips memories, MCP, and the global `AGENTS.md`. Use both.
+>
+> **When you DO want Codex to read the live repo** (rare for braintrust — we normally pass context inline), drop `-C` so its cwd is the repo, but keep the isolated `CODEX_HOME` so memories and MCP stay out. Context should come from your prompt, not from whatever Codex remembered.
+
+### Capturing CLI Failures (Don't Blackhole stderr)
+
+**Default to `2>/tmp/bt_<cli>.err`, not `2>/dev/null`.** Redirecting stderr to `/dev/null` is why the two most common braintrust failures get misdiagnosed:
+
+- **agy** returning empty looks like a "transient relay hiccup" but is often a hard `rc=124` timeout that does not recover on retry. The exit code tells you which; `/dev/null` hides it.
+- **grok** failing with `Auth(AuthorizationRequired)` on stderr looks like a login problem, but the **JSON error body on stdout** says the real cause (e.g. `403 ... out of credits or need a Grok subscription ... spending-limit`). `grok login` won't fix a billing cap.
+
+Keep stderr in a file, check the exit code, and surface the captured error when a CLI comes back empty. Only suppress stderr noise *after* you've confirmed success. The per-CLI error-handling block under "Handling Errors During Consultation" does this.
 
 ### Common Gemini Failure Modes
 
@@ -162,16 +203,17 @@ If Gemini fails, check these in order:
 
 ### Common Antigravity (agy) Failure Modes
 
-agy is a VS Code-fork-based CLI: `agy --print` spins up a headless Antigravity editor-agent backend that talks to a relay. It is **reliable warm (~4-5s)** but has occasional cold-start and transient-empty behavior. Its failures look like "agy is unavailable" but are almost always transient — retrying usually fixes them. (Observed directly: not a rate limit, no error on stderr; just an occasional empty or slow first call.)
+agy is a VS Code-fork-based CLI: `agy --print` spins up a headless Antigravity editor-agent backend that talks to a relay. It is **reliable warm (~4-5s)**, but it has two *distinct* failure shapes that look identical if you discard stderr and the exit code: a recoverable **cold start**, and a non-recoverable **hard hang**. Capture the exit code to tell them apart.
 
 | Symptom | Cause | Fix |
 |---------|-------|-----|
-| Times out on the first call, fast (~5s) on the next | **Cold start.** The first agy invocation spins up the editor-agent backend and can exceed a short timeout; warm calls return in ~5s. | Give the probe/consult a generous timeout (≥45s) plus one retry. **This is the #1 cause of agy↔gemini "thrashing":** a short-timeout false-negative marks agy unavailable, silently flips the Google AI slot to gemini, then the next session agy is warm and wins again. |
-| Empty stdout, exit 0 | Transient backend non-response (relay hiccup). No stderr, no error message. | Retry once — the probe does this automatically. The next call almost always succeeds. |
-| No model control | agy has **no `-m` flag** by design — it runs your Antigravity account-tier model. | If you need a specific model, use `gemini -m` instead. See "agy vs Gemini: Two Different Model Paths". |
+| Times out on the **first** call, fast (~5s) on the next | **Cold start.** The first agy invocation spins up the editor-agent backend. | Give it a generous timeout plus **one** retry. **This is the #1 cause of agy↔gemini "thrashing":** a short-timeout false-negative marks agy unavailable, silently flips the Google AI slot to gemini, then the next session agy is warm and wins again. |
+| Empty stdout, **`rc=124` on every attempt** (no stderr, no error) | **Hard hang, not transient.** agy's own `--print-timeout` defaults to **5m**, so an external `timeout 90` kills it with zero output and zero stderr before agy ever reports anything. Retrying does **not** recover it. Observed directly: 3 consecutive empties, all `rc=124`. | Do **not** keep retrying. Set an explicit short `--print-timeout` (e.g. `--print-timeout 80s`) so agy fails fast with its own diagnostics instead of being silently killed, capture stderr to a file, and after **one** failed retry treat agy as **down** for this consult and fall back to gemini. agy has no clean-profile/home flag, so isolation is not available; best-effort only. |
+| Empty stdout, **exit 0** | Genuine transient relay hiccup (rare). | Retry once. The next call usually succeeds. |
+| No model control | agy has **no `-m` flag** by design. It runs your Antigravity account-tier model. | If you need a specific model, use `gemini -m` instead. See "agy vs Gemini: Two Different Model Paths". |
 | Won't report its own model name | agy returns empty for "what model are you" style identity prompts. | Expected. Don't probe agy with identity questions; use a concrete task prompt. |
 
-> **Practical rule:** treat a single empty/timed-out agy result as transient, not terminal. Retry once with a ≥45s timeout before falling back to gemini. Don't conclude agy is "down" from one bad call.
+> **Practical rule:** distinguish the two by exit code. A first-call timeout that succeeds warm is cold start (retry once). Repeated `rc=124` empties are a hard hang, not "transient": stop retrying, note the gap, and fall back to gemini. Never conclude agy is healthy *or* "just flaky" without reading the exit code.
 
 ### Common Grok Failure Modes
 
@@ -179,9 +221,10 @@ If Grok fails, check these in order:
 
 | Symptom | Cause | Fix |
 |---------|-------|-----|
+| stderr spams `Auth(AuthorizationRequired)` / `Transport channel closed`, but stdout has a JSON error with `403 ... out of credits or need a Grok subscription ... [WKE=...spending-limit]` | **Billing cap, not a login problem.** The account is authenticated but out of credits or over its spending limit. The stderr `AuthorizationRequired` line is a misleading symptom; the real cause is the JSON error body on **stdout**. | **`grok login` will NOT fix this.** Add credits at grok.com/?_s=usage, upgrade the subscription, or switch to an `XAI_API_KEY` with available balance. Detect it by parsing the stdout JSON for `.type == "error"` and surfacing `.message` (see the error-handling block) instead of reporting a generic auth failure. |
 | `A subscription is required` / access gate | `grok-build` (Grok 4.3) requires an active Grok subscription (SuperGrok). | Subscribe at grok.com, or set `XAI_API_KEY` from console.x.ai for API-key auth. |
-| `run grok login` / auth error | Not signed in. | Run `grok login` (OAuth) or export `XAI_API_KEY`. |
-| Empty `.text` from `jq` | Wrong output format, or the answer is under a different field. | Use `--output-format json` and parse `jq -r '.text'`. The `thought` field holds reasoning, not the answer. |
+| `run grok login` / auth error (and **no** JSON error body) | Genuinely not signed in. | Run `grok login` (OAuth) or export `XAI_API_KEY`. Only conclude this after ruling out the billing-cap row above. |
+| Empty `.text` from `jq` | Wrong output format, the answer is under a different field, **or** the response was an error object. | Use `--output-format json`. First check `.type == "error"` (surface `.message`); otherwise parse `jq -r '.text'`. The `thought` field holds reasoning, not the answer. |
 | Hangs / interactive UI opens | Missing `-p`/`--single`. Without it, grok launches its TUI. | Always pass `-p "$QUERY"` for headless use. |
 | Model 404 | Unknown model id. | Valid ids: `grok-build` (default, Grok 4.3) and `grok-composer-2.5-fast`. Run `grok models` to list. |
 | A `cache/projects.json` appears in your repo | grok writes a per-project session registry into its **working directory** (observed: a bare `grok -p` inside a repo creates `./cache/projects.json`). | Harmless — safe to delete. To keep it out of the repo, add `cache/` to `.gitignore`, or pass `--cwd <scratch-dir>` (verified to keep the repo clean). |
@@ -195,8 +238,8 @@ If Grok fails, check these in order:
 | **Claude** (from Claude Code) | Task tool with `subagent_type: "general-purpose"` | Task tool with `model: "haiku"` |
 | **Claude** (from other CLIs) | `claude -p "query" --model sonnet --output-format json` | `--model haiku` |
 | **Gemini** | Uses `$bt_gemini_model` from model probe (see below) | Uses `$bt_gemini_fast` from model probe |
-| **Antigravity (agy)** | `agy --print "$QUERY" --dangerously-skip-permissions 2>/dev/null` (**primary** Google AI path) | N/A (no model flag) |
-| **Codex** | `codex exec --ephemeral -s read-only --json --skip-git-repo-check "query" < /dev/null 2>/dev/null` | N/A |
+| **Antigravity (agy)** | `agy --print "$QUERY" --print-timeout 80s --dangerously-skip-permissions 2>/tmp/bt_agy.err` (**primary** Google AI path) | N/A (no model flag) |
+| **Codex** | `CODEX_HOME="$bt_codex_home" codex exec --ephemeral -s read-only --json --skip-git-repo-check -C "${TMPDIR:-/tmp}" "query" < /dev/null 2>/tmp/bt_codex.err` (isolated clean-slate; see "Codex Isolation") | N/A |
 | **Grok** | `grok -p "query" -m grok-build --output-format json 2>/dev/null \| jq -r '.text'` | `-m grok-composer-2.5-fast` |
 
 ### Gemini Standard Flags
@@ -264,6 +307,15 @@ elif command -v gtimeout &>/dev/null; then TO="gtimeout"
 else TO=""; fi
 rt() { if [ -n "$TO" ]; then $TO "$@"; else shift; "$@"; fi; }   # exit 124 == timed out
 
+# --- Clean-slate Codex profile (no memories, no MCP, no global AGENTS.md) ---
+# Built once here and reused by every Codex consult. Reuses only auth.json.
+# Without this, Codex exec drags in ~/.codex memories + MCP servers, which biases
+# reviews and can hang startup to a timeout. See "Codex Isolation".
+bt_codex_home="${TMPDIR:-/tmp}/bt-codex-home"
+mkdir -p "$bt_codex_home"
+printf '# braintrust isolated profile: no memories, no MCP, no global AGENTS.md\n' > "$bt_codex_home/config.toml"
+[ -f "$HOME/.codex/auth.json" ] && cp "$HOME/.codex/auth.json" "$bt_codex_home/auth.json" 2>/dev/null
+
 # --- Antigravity CLI (agy) - PRIMARY Google AI path (no -m; account-tier model) ---
 probe_agy() {
   echo "bt_agy_available=false" > "$D/agy.env"
@@ -294,17 +346,17 @@ probe_gemini() {
   fi
 }
 
-# --- Codex (loads MCP servers + skills on every exec; allow for slow cold start) ---
+# --- Codex (run against the isolated clean-slate home: no MCP boot, no memories) ---
 probe_codex() {
   echo "bt_codex_available=false" > "$D/codex.env"
   command -v codex &>/dev/null || { echo "Codex: not installed" > "$D/codex.log"; return; }
   local out rc
   for a in 1 2; do
-    out=$(rt 60 codex exec --ephemeral -s read-only --json --skip-git-repo-check "Reply with the single word: ok" < /dev/null 2>/dev/null | jq -rs 'map(select(.item.type? == "agent_message")) | last | .item.text' 2>/dev/null); rc=${PIPESTATUS[0]}
+    out=$(rt 60 env CODEX_HOME="$bt_codex_home" codex exec --ephemeral -s read-only --json --skip-git-repo-check -C "${TMPDIR:-/tmp}" "Reply with the single word: ok" < /dev/null 2>/dev/null | jq -rs 'map(select(.item.type? == "agent_message")) | last | .item.text' 2>/dev/null); rc=${PIPESTATUS[0]}
     [ -n "$out" ] && [ "$out" != "null" ] && { echo "bt_codex_available=true" > "$D/codex.env"; break; }
     [ "$rc" = "124" ] && break
   done
-  grep -q true "$D/codex.env" && echo "Codex: available" > "$D/codex.log" || echo "Codex: empty/timeout after warm-up retry" > "$D/codex.log"
+  grep -q true "$D/codex.env" && echo "Codex: available [isolated home]" > "$D/codex.log" || echo "Codex: empty/timeout after warm-up retry" > "$D/codex.log"
 }
 
 # --- Grok (Grok Build / Grok 4.3; grok-build needs a Grok subscription) ---
@@ -336,6 +388,7 @@ bt_codex_available=${bt_codex_available:-false}
 bt_grok_available=${bt_grok_available:-false}
 bt_grok_model=${bt_grok_model:-grok-build}
 bt_grok_fast=${bt_grok_fast:-grok-composer-2.5-fast}
+bt_codex_home=${bt_codex_home:-${TMPDIR:-/tmp}/bt-codex-home}
 EOF
 rm -rf "$D"
 echo "--- Results cached to /tmp/bt_models.env ---"
@@ -386,40 +439,57 @@ else
   echo "$gemini_response"
 fi
 
-# Codex with error detection (CRITICAL: always close stdin AND redirect stderr)
-# - `< /dev/null` prevents stdin hang (Codex reads stdin even when a prompt arg is passed)
-# - `2>/dev/null` prevents stderr noise from corrupting the JSONL stream
-codex exec --ephemeral -s read-only --json --skip-git-repo-check "$QUERY" < /dev/null 2>/dev/null > /tmp/codex.json
+# Codex with isolation + error detection
+# - CODEX_HOME=clean profile: no memories/MCP/global AGENTS.md (unbiased reviewer; see "Codex Isolation")
+# - -C scratch dir: don't read the repo we're standing in (context comes from $QUERY)
+# - < /dev/null: prevents stdin hang (Codex reads stdin even when a prompt arg is passed)
+# - stderr -> a file (not /dev/null): keeps it off the JSONL stream AND lets you read a hang/auth error
+source /tmp/bt_models.env 2>/dev/null
+CODEX_HOME="${bt_codex_home:-/tmp/bt-codex-home}" timeout 150 codex exec --ephemeral -s read-only --json --skip-git-repo-check -C "${TMPDIR:-/tmp}" "$QUERY" < /dev/null 2>/tmp/bt_codex.err > /tmp/codex.json
+codex_exit=$?
 codex_response=$(jq -rs 'map(select(.item.type? == "agent_message")) | last | .item.text' /tmp/codex.json 2>/dev/null)
-if [ -z "$codex_response" ] || [ "$codex_response" = "null" ]; then
-  echo "CODEX_FAILED: empty or unparseable response"
+if [ "$codex_exit" -eq 124 ]; then
+  echo "CODEX_FAILED: timed out after 150s (stderr: $(tail -1 /tmp/bt_codex.err))"
+elif [ -z "$codex_response" ] || [ "$codex_response" = "null" ]; then
+  echo "CODEX_FAILED: empty/unparseable response (stderr: $(tail -3 /tmp/bt_codex.err | tr '\n' ' '))"
 else
   echo "$codex_response"
 fi
 
-# agy with warm-up retry (transient empties are common; a timeout means cold start)
-agy_response=$(timeout 90 agy --print "$QUERY" --dangerously-skip-permissions 2>/dev/null)
-if [ -z "$agy_response" ]; then
-  agy_response=$(timeout 90 agy --print "$QUERY" --dangerously-skip-permissions 2>/dev/null)  # one retry warms it up
-  [ -z "$agy_response" ] && echo "AGY_FAILED: empty after retry (fall back to gemini)" || echo "$agy_response"
+# agy with exit-code-aware retry. Distinguish cold start (retry once) from a hard hang (don't).
+# --print-timeout makes agy fail fast with its own diagnostics instead of being killed silently at the
+# external timeout. agy has no clean-profile flag, so isolation is unavailable -- best-effort only.
+run_agy() { timeout 100 agy --print "$QUERY" --print-timeout 80s --dangerously-skip-permissions 2>/tmp/bt_agy.err; }
+agy_response=$(run_agy); agy_exit=$?
+if [ "$agy_exit" -ne 124 ] && [ -z "$agy_response" ]; then
+  agy_response=$(run_agy); agy_exit=$?   # exit 0 + empty = genuine transient; one warm-up retry
+fi
+if [ "$agy_exit" -eq 124 ]; then
+  echo "AGY_FAILED: hard timeout (rc=124) -- NOT transient, do not keep retrying. Treat as down, fall back to gemini. (stderr: $(tail -1 /tmp/bt_agy.err))"
+elif [ -z "$agy_response" ]; then
+  echo "AGY_FAILED: empty after warm-up retry -> fall back to gemini (stderr: $(tail -1 /tmp/bt_agy.err))"
 else
   echo "$agy_response"
 fi
 
-# Grok with error detection (parse .text; .thought holds reasoning, not the answer)
+# Grok with error detection. The answer is .text; a failure arrives as {"type":"error","message":...} on stdout.
+# Check for the error object FIRST: a 403 "out of credits / spending-limit" is a billing cap, NOT a login issue.
 source /tmp/bt_models.env 2>/dev/null || bt_grok_model="grok-build"
-grok_exec_out=$(timeout 120 grok -p "$QUERY" -m "$bt_grok_model" --output-format json 2>/dev/null)
-grok_response=$(echo "$grok_exec_out" | jq -r '.text' 2>/dev/null)
-if [ -z "$grok_response" ] || [ "$grok_response" = "null" ]; then
-  echo "GROK_FAILED: empty/unauthenticated (run: grok login; grok-build needs a subscription)"
+grok_exec_out=$(timeout 120 grok -p "$QUERY" -m "$bt_grok_model" --output-format json 2>/tmp/bt_grok.err)
+grok_err=$(echo "$grok_exec_out" | jq -r 'select(.type=="error") | .message' 2>/dev/null)
+grok_response=$(echo "$grok_exec_out" | jq -r 'select(.type!="error") | .text' 2>/dev/null)
+if [ -n "$grok_err" ]; then
+  echo "GROK_FAILED: $grok_err"   # surfaces the real cause (e.g. out of credits) -- grok login will not fix a billing cap
+elif [ -z "$grok_response" ] || [ "$grok_response" = "null" ]; then
+  echo "GROK_FAILED: empty response (stderr: $(tail -1 /tmp/bt_grok.err)). If stderr says 'AuthorizationRequired', check credits/subscription before assuming you need 'grok login'."
 else
   echo "$grok_response"
 fi
 ```
 
-> **Codex blank output fix:** Codex writes skill-loading noise and warnings to stderr. If stderr is not redirected with `2>/dev/null`, it corrupts the JSONL stream and `jq` silently returns nothing. **Always use `2>/dev/null`** when piping Codex output.
+> **Keep Codex stderr off stdout, but in a file.** Codex writes skill-loading noise and warnings to stderr; if that merges into stdout it corrupts the JSONL stream and `jq` silently returns nothing. Redirect to a **file** (`2>/tmp/bt_codex.err`), not `/dev/null`, so the stream stays clean *and* you can read the real error (timeout, auth, MCP hang) when the response is empty.
 >
-> **Grok parsing:** `--output-format json` returns `{"text": "...", "thought": "...", "stopReason": ...}`. Parse the answer with `jq -r '.text'`. The `plain` format prints the answer directly with no parsing, but `json` is safer for capturing into a variable.
+> **Grok parsing:** `--output-format json` returns `{"text": "...", "thought": "...", "stopReason": ...}` on success, or `{"type":"error","message":...}` on failure. Check `.type=="error"` first, then parse `.text`. The `plain` format prints the answer directly with no parsing, but `json` is required to detect the error object and capture into a variable.
 
 ### Model Fallback Chains
 
@@ -528,18 +598,18 @@ Auto-applying suggestions defeats the purpose of a second opinion. The user shou
 Get a second opinion from the braintrust. **Always source the model probe first:**
 
 ```bash
-source /tmp/bt_models.env 2>/dev/null || { bt_gemini_model="gemini-3.1-pro-preview"; bt_grok_model="grok-build"; }
+source /tmp/bt_models.env 2>/dev/null || { bt_gemini_model="gemini-3.1-pro-preview"; bt_grok_model="grok-build"; bt_codex_home="/tmp/bt-codex-home"; }
 
 # Consult the Google AI slot (agy preferred; gemini if agy unavailable) - ONE of these, not both
-agy --print "Review this implementation approach: [CONTEXT]" --dangerously-skip-permissions 2>/dev/null
+agy --print "Review this implementation approach: [CONTEXT]" --print-timeout 80s --dangerously-skip-permissions 2>/tmp/bt_agy.err
 # ...or, if bt_agy_available=false:
 timeout 120 gemini -p "Review this implementation approach: [CONTEXT]" -m "$bt_gemini_model" --approval-mode yolo --no-sandbox -o text 2>/dev/null
 
-# Consult Codex (via Bash tool)
-codex exec --ephemeral -s read-only --json --skip-git-repo-check "Review this implementation approach: [CONTEXT]" < /dev/null 2>/dev/null | jq -rs 'map(select(.item.type? == "agent_message")) | last | .item.text'
+# Consult Codex (via Bash tool) - isolated clean-slate home + scratch cwd (see "Codex Isolation")
+CODEX_HOME="${bt_codex_home:-/tmp/bt-codex-home}" codex exec --ephemeral -s read-only --json --skip-git-repo-check -C "${TMPDIR:-/tmp}" "Review this implementation approach: [CONTEXT]" < /dev/null 2>/tmp/bt_codex.err | jq -rs 'map(select(.item.type? == "agent_message")) | last | .item.text'
 
-# Consult Grok (via Bash tool)
-timeout 120 grok -p "Review this implementation approach: [CONTEXT]" -m "$bt_grok_model" --output-format json 2>/dev/null | jq -r '.text'
+# Consult Grok (via Bash tool) - check for an error object before parsing .text
+timeout 120 grok -p "Review this implementation approach: [CONTEXT]" -m "$bt_grok_model" --output-format json 2>/tmp/bt_grok.err | jq -r 'if .type=="error" then "GROK_FAILED: "+.message else .text end'
 
 # Consult Claude (via Task tool, NOT bash)
 # Use Task tool with subagent_type: "general-purpose" and the query as the prompt
@@ -640,7 +710,8 @@ timeout 120 gemini -p "Research: $TOPIC" -m "$bt_gemini_model" --approval-mode y
 
 **Tool call 3** - Bash tool (run_in_background: true):
 ```bash
-codex exec --ephemeral -s read-only --json --skip-git-repo-check "Research: $TOPIC" < /dev/null 2>/dev/null > /tmp/codex.json
+source /tmp/bt_models.env 2>/dev/null
+CODEX_HOME="${bt_codex_home:-/tmp/bt-codex-home}" codex exec --ephemeral -s read-only --json --skip-git-repo-check -C "${TMPDIR:-/tmp}" "Research: $TOPIC" < /dev/null 2>/tmp/bt_codex.err > /tmp/codex.json
 ```
 
 Then read the results:
@@ -832,7 +903,8 @@ Before finalizing, verify each finding is material and actionable.
 Prefer one strong finding over several weak ones.
 </verification_loop>'
 
-codex exec --ephemeral -s read-only --json --skip-git-repo-check "$REVIEW_PROMPT" < /dev/null 2>/dev/null > /tmp/codex.json
+source /tmp/bt_models.env 2>/dev/null
+CODEX_HOME="${bt_codex_home:-/tmp/bt-codex-home}" codex exec --ephemeral -s read-only --json --skip-git-repo-check -C "${TMPDIR:-/tmp}" "$REVIEW_PROMPT" < /dev/null 2>/tmp/bt_codex.err > /tmp/codex.json
 ```
 
 ## Saving Consultation Sessions
@@ -1066,7 +1138,8 @@ AUDIT_PROMPT="Review this codebase for security vulnerabilities:
 4. CSRF protection
 5. Secrets in code
 6. Rate limiting gaps"
-codex exec --ephemeral -s read-only --json --skip-git-repo-check "$AUDIT_PROMPT" < /dev/null 2>/dev/null > /tmp/codex-security.json
+source /tmp/bt_models.env 2>/dev/null
+CODEX_HOME="${bt_codex_home:-/tmp/bt-codex-home}" codex exec --ephemeral -s read-only --json --skip-git-repo-check -C "${TMPDIR:-/tmp}" "$AUDIT_PROMPT" < /dev/null 2>/tmp/bt_codex.err > /tmp/codex-security.json
 ```
 
 **Tool call 4** - Bash tool (run_in_background: true):
@@ -1130,7 +1203,8 @@ timeout 120 gemini -p "Research: best practices for implementing rate limiting i
 
 **Tool call 3** - Bash tool (run_in_background: true):
 ```bash
-codex exec --ephemeral -s read-only --json --skip-git-repo-check "Research: best practices for implementing rate limiting in Node.js APIs" < /dev/null 2>/dev/null > /tmp/codex.json
+source /tmp/bt_models.env 2>/dev/null
+CODEX_HOME="${bt_codex_home:-/tmp/bt-codex-home}" codex exec --ephemeral -s read-only --json --skip-git-repo-check -C "${TMPDIR:-/tmp}" "Research: best practices for implementing rate limiting in Node.js APIs" < /dev/null 2>/tmp/bt_codex.err > /tmp/codex.json
 ```
 
 **Tool call 4** - Bash tool (run_in_background: true):
@@ -1220,12 +1294,12 @@ Then synthesize findings from every source that responded. (Swap Tool call 2 for
 | `--add-dir` | Additional writable directories alongside workspace |
 | `--output-schema` | Structured JSON response matching a schema |
 | `-o, --output-last-message` | Write final message to file |
-| `--ephemeral` | Skip persisting session files |
+| `--ephemeral` | Skip persisting the NEW session. Does **not** disable loading memories, MCP, or global AGENTS.md. |
 | `--skip-git-repo-check` | Run outside a git repo |
 | `--dangerously-bypass-approvals-and-sandbox` | Skip all prompts, no sandbox. For externally sandboxed envs only. |
 | `--color` | ANSI color control: always/never/auto |
 
-### Grok (Grok Build)
+> **`CODEX_HOME` (env var, not a flag)** points Codex at a profile directory (default `~/.codex`). Set it to a clean throwaway dir to get an unbiased reviewer with no memories, no MCP servers, and no global `AGENTS.md`. This is the only reliable way to isolate Codex; `--ephemeral` and `-C` do not do it. The probe builds `$bt_codex_home` for this. See "Codex Isolation: Clean-Slate Reviewer".
 | Flag | Purpose |
 |------|---------|
 | `-p, --single` | Single-turn headless prompt. Prints the response and exits (**required** for headless; without it grok opens its TUI) |
@@ -1261,9 +1335,12 @@ Then synthesize findings from every source that responded. (Swap Tool call 2 for
 10. **Always close Codex stdin with `< /dev/null`** - Codex `exec "prompt"` reads stdin by default. Without `< /dev/null`, it hangs forever inside Claude Code's Bash tool with "Reading additional input from stdin...". This is the single most common reason Codex "doesn't work" in harnesses.
 11. **Use `codex exec review` for code review** - The dedicated review subcommand auto-reads git diffs; no need to craft review prompts manually
 12. **Always use `--ephemeral -s read-only` for Codex** - Braintrust consultations are stateless and read-only. Only switch to `-s workspace-write` when the user explicitly asks Codex to make changes.
-13. **Always pass `-p` to Grok** - Without it, grok opens its interactive TUI instead of answering headlessly. Parse `.text` (not `.thought`) from `--output-format json`.
-14. **agy is one warm-up away** - A single empty/slow agy call is transient (cold start or a relay hiccup, not a rate limit). Retry once before falling back to gemini; don't let it flip the Google AI slot.
-15. **Never auto-fix review findings** - Present findings and let the user decide what to act on
+13. **Always run Codex with an isolated `CODEX_HOME`** - `--ephemeral` is NOT a blank slate: Codex still loads `~/.codex` memories, MCP servers, and the global `AGENTS.md`. That contaminates reviews (observed: an off-topic answer pulled from a memory) and biases synthesis. Point `CODEX_HOME` at a clean throwaway profile (the probe builds `$bt_codex_home`) and add `-C` to a scratch dir. `-C /tmp` alone is not enough. See "Codex Isolation".
+14. **Always pass `-p` to Grok** - Without it, grok opens its interactive TUI instead of answering headlessly. Parse `.text` (not `.thought`) from `--output-format json`, and check `.type=="error"` first.
+15. **A Grok `AuthorizationRequired` error is usually billing, not login** - The JSON body says the real cause. `out of credits / spending-limit` means add credits or use an `XAI_API_KEY` with balance; `grok login` will not fix it.
+16. **Tell agy's two failure modes apart by exit code** - A first-call timeout that succeeds warm is cold start (retry once). Repeated `rc=124` empties are a hard hang, not "transient": stop retrying and fall back to gemini. Set `--print-timeout` so agy fails fast instead of being killed silently, and capture stderr to a file.
+17. **Capture CLI stderr to a file, not `/dev/null`** - `2>/dev/null` is why agy timeouts and grok billing errors get misdiagnosed. Use `2>/tmp/bt_<cli>.err`, check the exit code, and surface the captured error when a response is empty.
+18. **Never auto-fix review findings** - Present findings and let the user decide what to act on
 
 ## Further Reading
 

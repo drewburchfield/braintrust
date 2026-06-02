@@ -38,6 +38,13 @@ agy and Gemini share one "Google AI" slot (agy preferred); the others each contr
 - Security audits with diverse model perspectives
 - Offload large-context work to Google AI (agy / gemini 1M context)
 
+## v1.7.0 Highlights
+
+- **Codex now runs as a true clean-slate reviewer.** `codex exec --ephemeral` was never a blank slate: it loaded `~/.codex` memories, MCP servers, and the global `AGENTS.md`, which contaminated reviews (observed: a diff review that answered an unrelated project's spec pulled from a memory) and biased synthesis. Every Codex consult now runs against an isolated throwaway `CODEX_HOME` (no memories, no MCP, no global AGENTS.md). This also removes the MCP-boot startup hangs.
+- **Stop blackholing stderr.** CLI calls now capture stderr to `/tmp/bt_<cli>.err` instead of `2>/dev/null`, so failures are diagnosable. This fixed two long-standing misdiagnoses: an agy "transient empty" that is actually a hard `rc=124` timeout, and a Grok `AuthorizationRequired` that is actually a **403 billing cap** (`out of credits / spending-limit`) that `grok login` cannot fix.
+- **agy failure handling is exit-code-aware.** Cold start (retry once) vs a hard hang (`rc=124`, stop retrying and fall back to gemini) are now distinguished. Calls set an explicit `--print-timeout` so agy fails fast with its own diagnostics instead of being killed silently.
+- **Grok error detection.** Consults parse the `{"type":"error","message":...}` object and surface the real cause (e.g. billing) instead of a generic "empty/unauthenticated".
+
 ## v1.6.0 Highlights
 
 - **Grok Build (Grok 4.3)** added as a first-class braintrust member. Headless: `grok -p "..." -m grok-build --output-format json | jq -r '.text'`.

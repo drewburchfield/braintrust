@@ -17,6 +17,12 @@ Membership is decided by availability, not by your judgement: if a CLI is instal
 
 > The Google AI slot is **one voice**, not two. agy and gemini are two access paths to Google's models (see "agy vs Gemini: Two Different Model Paths"). Use **agy when available** (it runs your best account-tier model); fall back to **gemini** only when agy is unavailable. Never launch both for the same query.
 
+**Grounding First (do this before launching members):**
+- Determine `session_anchor` (e.g. 2026-06-17-my-task or current session ID/slug). Use the *same value* for the entire conversation thread (works across days if the session persists).
+- Ensure a Goal Card exists: `mkdir -p .braintrust/goal-cards`; draft from user request + session context if missing; include the `session_anchor`; save to `.braintrust/goal-cards/<slug>.md`. Read it back.
+- Curate the context package as described in "Context Packaging + Goal Card".
+- Include the full Goal Card + Skeptical Colleague Protocol in every prompt.
+
 **Launch all available members in a single parallel batch using multiple tool calls in one response:**
 
 > **First call in a session?** Run the model probe (see "Model Discovery" section) first. It takes ~30-90s and decides who's in (installed + authenticated) and which models to use. If `/tmp/bt_models.env` already exists from an earlier call, skip the probe.
@@ -47,15 +53,33 @@ Membership is decided by availability, not by your judgement: if a CLI is instal
    > - **`< /dev/null`** closes stdin. Codex's `exec "prompt"` reads stdin by default and hangs forever when the harness pipes to it.
    >
    > Capture stderr to a file (`2>/tmp/bt_codex.err`), not `/dev/null`, so you can read the real error if the run comes back empty. See "Common Codex Failure Modes" below.
-4. **Grok** (if `bt_grok_available=true`): Use the Bash tool with `run_in_background: true`:
+4. **Grok** (if `bt_grok_available=true`): Use the Bash tool with `run_in_background: true`.
+   **Preferred:** If the workspace has the `grounded-colleague` skill (from our Grok-side build), prefer routing through it for stronger grounding:
+   ```bash
+   source /tmp/bt_models.env 2>/dev/null || bt_grok_model="grok-build"
+   grok -p "/grounded-colleague $QUERY" -m "$bt_grok_model" --output-format json 2>/dev/null | jq -r '.text'
+   ```
+   Fallback direct (embed the colleague protocol in $QUERY as described in Context Packaging):
    ```bash
    source /tmp/bt_models.env 2>/dev/null || bt_grok_model="grok-build"
    grok -p "$QUERY" -m "$bt_grok_model" --output-format json 2>/dev/null | jq -r '.text'
    ```
 
-   > **Grok note:** `grok-build` is Grok 4.3 and needs a Grok subscription. The `json` format returns `{"text": ..., "thought": ...}`; parse the answer with `jq -r '.text'`. See "Common Grok Failure Modes" below.
+   > **Grok note:** `grok-build` is Grok 4.3 and needs a Grok subscription. When the new `grounded-colleague` skill is present on the Grok side, using `/grounded-colleague` + Goal Card gives you the full Skeptical Colleague persona (high reasoning effort, explicit assumptions + evidence mandate). The `json` format returns `{"text": ..., "thought": ...}`; parse the answer with `jq -r '.text'`. See "Common Grok Failure Modes" below.
 
 > **Skip unavailable CLIs.** If the probe marked a CLI as unavailable or unauthenticated, do not launch it. Note the gap in your synthesis instead.
+
+**Grounded Consultation Protocol (MANDATORY for rich, consistent results):**
+Before building any $QUERY or prompt for braintrust members:
+1. **Establish or reference a Goal Card.** Determine `session_anchor` for this thread (date-based slug or native session ID; same value across days if continuing the session). If no Goal Card exists for this task, draft one from the user's original request + session context (use the structure in goal-card-template.md). Include the `session_anchor` and use the *same value* for the thread. Write it to `.braintrust/goal-cards/<slug>.md`. Create the dir with `mkdir -p .braintrust/goal-cards`. Read it back.
+2. **Curate context actively.** Do not rely solely on what the main session "has". Use tools (list_dir, grep, read_file on key files, git status/diff if relevant) to assemble a tight, relevant context package. Include:
+   - The full Goal Card
+   - Original user goal / request
+   - Curated relevant files or diffs (inline or @path where supported)
+   - Recent decisions or constraints from the conversation
+3. **Inject the Skeptical Colleague Protocol** into every delegation prompt (see the full protocol below and in the Grok grounding-colleague persona for reference). This dramatically improves honesty and grounding vs generic "review this".
+
+The main source of variable richness is weak context packaging by the host agent. By making the braintrust skill itself responsible for Goal Card + curation + protocol, outcomes become far more consistent.
 
 Present each model's findings to the user as they arrive. After all available members respond, synthesize the findings and save a session file.
 
@@ -869,76 +893,89 @@ jq -rs 'map(select(.item.type? == "agent_message")) | last | .item.text' /tmp/co
 
 The Claude result comes back from the Task tool output directly.
 
-## Prompt Enhancement: Self-Critique Pattern
+## Skeptical Colleague Protocol (Grounding Standard)
 
-**Tested and validated:** Adding a self-critique requirement to consultation prompts improves response quality by triggering deeper analysis.
+Use this 6-step protocol on every braintrust member (instead of the old 2-3 bullet self-critique). It produces richer, more consistent, honest output.
 
-### The Pattern
+**Protocol (include verbatim or via the grounding-protocol.md reference at top of prompts):**
 
-Append this to consultation prompts:
+1. **Goal Restatement (always first)**  
+   Quote or paraphrase the Goal Card and original request. State success criteria in your own words.
 
+2. **Assumptions Audit**  
+   Explicitly list every assumption (stated or implicit). Flag risky ones.
+
+3. **Evidence Mandate**  
+   Do not trust the main agent's narrative. Independently verify claims by reading files, running commands, etc. Cite specific sources (file:line, output).
+
+4. **Goal Fidelity Check**  
+   Call out scope drift or loose alignment with the stated goal + success criteria.
+
+5. **Honesty & Reasoning Review**  
+   Surface optimistic thinking, unexamined risks, or reasoning gaps.
+
+6. **Clear Verdict**  
+   End with: **GROUNDED** (with evidence summary) or **NOT GROUNDED** (specific gaps + what must be fixed).
+
+Always start prompts with the Goal Card. Reference it explicitly.
+
+## Context Packaging + Goal Card (Critical for Consistency)
+
+**The biggest source of "sometimes rich, sometimes not" results is inconsistent context that the main agent chooses to share.** Fix this by making the braintrust skill own the curation.
+
+### Always Start With a Goal Card
+Before any parallel calls:
+- `mkdir -p .braintrust/goal-cards`
+- Create or load the Goal Card at `.braintrust/goal-cards/<task-slug>.md` (see goal-card-template.md).
+- It must contain: one-sentence goal, explicit success criteria, out-of-scope, key constraints.
+- Include the full Goal Card text at the top of **every** prompt to braintrust members.
+- Reference it explicitly: "Read the Goal Card first. Your entire response must stay grounded against it."
+
+Example Goal Card header (full card lives at `.braintrust/goal-cards/<slug>.md`):
 ```
-IMPORTANT: After your analysis, include a 'Self-Critique' section with 2-3 bullets identifying limitations or uncertainties in your review.
-```
-
-### When to Use
-
-- **Code reviews** - Models acknowledge edge cases they may have missed
-- **Architecture analysis** - Surfaces assumptions about context
-- **Security audits** - Identifies scope limitations
-- **Any high-stakes consultation** - When you need to know what the model didn't consider
-
-### Why It Works
-
-In practice:
-- All CLIs (agy/Gemini, Codex, Grok, Claude) consistently follow the self-critique instruction
-- The primary analysis tends to be more thorough when self-critique is requested
-- Models surface context dependencies, scope limitations, and assumptions
-
-### Example
-
-```bash
-# Without self-critique (finds 1 bug)
-gemini -p "Review this function for bugs: async function fetchUser(id) {
-  const response = await fetch('/api/users/' + id);
-  const data = response.json();
-  return data;
-}" -m "$bt_gemini_fast" -o text 2>/dev/null
-
-# With self-critique (finds 4 bugs)
-gemini -p "Review this function for bugs: async function fetchUser(id) {
-  const response = await fetch('/api/users/' + id);
-  const data = response.json();
-  return data;
-}
-
-IMPORTANT: After your analysis, include a 'Self-Critique' section with 2-3 bullets identifying limitations or uncertainties in your review." -m "$bt_gemini_fast" -o text 2>/dev/null
-```
-
-## Context Packaging: Project-Aware Queries
-
-**Include project context in every outbound query.** Gemini and Codex start from zero. Fill in what you already know from the session:
-
-```
-## Project Context
-- Stack: [languages, frameworks, key libraries]
-- Structure: [key directories and what they contain]
-- Build/Test: [how to build and test, if known]
-
-## Task Context
-- What we're working on and why
-- Relevant files already examined
-
-## Question
-[The actual consultation query]
-
-## Constraints
-[API compatibility, performance requirements, style conventions, etc.]
-
-IMPORTANT: After your analysis, include a 'Self-Critique' section with 2-3 bullets identifying limitations or uncertainties in your review.
+## GOAL CARD (read this first)
+session_anchor: 2026-06-17-auth-work   # use the same value for the entire session/thread
+Goal: [one sentence]
+Success Criteria:
+- ...
+Out of Scope: ...
 ```
 
-**Note:** The self-critique suffix is baked into the template. Don't add it separately - it's already included above.
+### Curated Context (do this in the skill, not left to the host)
+Actively gather:
+- Goal Card (from `.braintrust/goal-cards/<slug>.md`)
+- Original request
+- Key files / diffs (read them yourself with tools)
+- Current state / decisions
+
+Then package a tight block:
+
+```
+## GOAL CARD
+[full card]
+
+## CURATED CONTEXT (verified by me)
+- Project: ...
+- Relevant files read: [list with key excerpts]
+- Recent decisions: ...
+- Constraints: ...
+
+## QUESTION / TASK
+[the ask]
+
+## SKEPTICAL COLLEAGUE PROTOCOL (apply this)
+**Default history scope:** Only reference prior Goal Cards that share the exact same `session_anchor` as the current one. Broaden only if explicitly asked.
+
+1. Restate the goal and success criteria in your own words.
+2. Explicitly list every assumption you or the work is making.
+3. Ground every claim in the provided context + fresh evidence you gather (read files, run commands if appropriate). Cite specific sources.
+4. Call out any goal drift or loose alignment.
+5. Surface optimistic thinking or unexamined risks.
+6. End with a clear verdict: GROUNDED (with evidence summary) or NOT GROUNDED (specific gaps + what to fix).
+```
+
+### For Codex (still use XML for best results)
+Wrap the above in the <task> and <grounding_rules> blocks, plus the protocol in <verification_loop> or additional instructions.
 
 ## Codex Prompt Structure: XML Blocks
 
@@ -1025,6 +1062,9 @@ Avoid unrelated refactors, renames, or cleanup unless required for correctness.
 
 ```bash
 REVIEW_PROMPT='<task>
+## GOAL CARD
+[insert or reference .braintrust/goal-cards/<slug>.md here]
+
 Review the authentication middleware for correctness and security issues.
 Focus on session handling, token validation, and authorization checks.
 </task>
@@ -1053,7 +1093,9 @@ CODEX_HOME="${bt_codex_home:-/tmp/bt-codex-home}" codex exec --ephemeral -s read
 
 ## Saving Consultation Sessions
 
-After synthesizing, save a session file to `.braintrust/sessions/` for future reference. Create the directory if it doesn't exist (`mkdir -p .braintrust/sessions`).
+After synthesizing, save a session file to `.braintrust/sessions/` for future reference. Also keep the Goal Card at `.braintrust/goal-cards/`.
+
+Create dirs if needed: `mkdir -p .braintrust/sessions .braintrust/goal-cards`
 
 Filename: `YYYY-MM-DD-HMMam-slug.md` (e.g., `2026-02-16-230pm-rate-limiting-review.md`). 12-hour time, no leading zero on hour, lowercase am/pm.
 
@@ -1061,6 +1103,10 @@ Use this format to document the full consultation for future reference:
 
 ```markdown
 # [Short Topic Description]
+
+## Goal Card
+Path: `.braintrust/goal-cards/<slug>.md`
+session_anchor: [value from the card — this defines the default "current session" scope for prior goals]
 
 ## Query
 [The context-packaged prompt sent to all models]

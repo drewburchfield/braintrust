@@ -12,6 +12,11 @@ A [Claude Code](https://docs.anthropic.com/en/docs/claude-code) plugin from the 
 
 Delegates tasks to other AI CLIs running in parallel. Get second opinions on architecture decisions, offload research to models with larger context windows, or run design reviews across multiple models simultaneously.
 
+**Grounding improvements** (integrated with the Grok "grounded-colleague" pattern):
+- Goal Cards always created at `.braintrust/goal-cards/<slug>.md` (standard location alongside `.braintrust/sessions/`). Each carries a `session_anchor` (date-based slug or session ID). By default only prior goals with the *matching anchor* (i.e. same session/thread) are considered — broader history only if explicitly requested. This works even when sessions span multiple days.
+- Skeptical Colleague 6-step protocol (restatement, assumptions, evidence, fidelity, honesty review, clear verdict) is the standard — replaces old self-critique.
+- The skill actively curates context + Goal Card before delegating. This fixes inconsistent richness from variable context the host agent chooses to share.
+
 Braintrust members (consulted in parallel, gated by what's installed and authenticated):
 
 - **Antigravity CLI (agy)** — primary Google AI path (runs your Antigravity account-tier Gemini model)

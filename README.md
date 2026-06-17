@@ -43,6 +43,15 @@ agy and Gemini share one "Google AI" slot (agy preferred); the others each contr
 - Security audits with diverse model perspectives
 - Offload large-context work to Google AI (agy / gemini 1M context)
 
+## v1.8.0 Highlights
+
+- **Grounded Colleague / Skeptical Colleague protocol**: Full 6-step protocol (goal restatement, assumptions audit, evidence mandate, goal fidelity, honesty review, clear GROUNDED/NOT GROUNDED verdict) now standard. Replaces previous self-critique pattern for richer, more consistent second opinions.
+- **Goal Cards with session_anchor**: Every consult now creates/loads a Goal Card at `.braintrust/goal-cards/<slug>.md`. Includes `session_anchor` (e.g. date-based slug) so prior goals are scoped to the current session/thread by default. Broader repo history only on explicit request. Addresses "sometimes rich, sometimes not" context variability.
+- **Session-scoped history by default**: Colleague and orchestrator only reference prior Goal Cards with matching `session_anchor` unless user asks to broaden. Supports sessions spanning days via consistent anchor.
+- **Active context curation**: The skill now takes ownership of curating Goal Card + relevant context before delegating to other CLIs.
+- **Grok integration**: When Grok is available, prefers routing through the new `/grounded-colleague` skill for native high-effort persona support.
+- Updated protocol docs, templates, context packaging, invocation examples, and session saving format to include Goal Card references.
+
 ## v1.7.1 Highlights
 
 - **agy actually works headless now.** `agy --print` only flushes its answer to a real TTY; as a subprocess it hangs on macOS / returns empty on Win+Linux (upstream bug [antigravity-cli#76](https://github.com/google-antigravity/antigravity-cli/issues/76), open through agy 1.0.4). braintrust now runs agy through a bundled **PTY wrapper** (`/tmp/bt_agy_pty.py`, written by the probe) that gives it a pseudo-terminal, strips ANSI, and enforces a real timeout. Verified: a bare call hangs `rc=124`; the wrapped call returns a full review in ~5-7s, so agy is a live Google AI voice again instead of "always down".

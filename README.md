@@ -2,7 +2,7 @@
 
 <img src="https://ghrb.waren.build/banner?header=braintrust%20%F0%9F%A7%A0&subheader=Orchestrate%20AI%20CLIs%20for%20second%20opinions%20and%20research&bg=0a1628&secondaryBg=1e3a5f&color=e8f0fe&subheaderColor=7eb8da&headerFont=Inter&subheaderFont=Inter&support=false" alt="braintrust" width="100%">
 
-A [Claude Code](https://docs.anthropic.com/en/docs/claude-code) plugin from the [not-my-job](https://github.com/drewburchfield/not-my-job) marketplace.
+A multi-harness plugin from the [not-my-job](https://github.com/drewburchfield/not-my-job) marketplace. Primary host: [Claude Code](https://docs.anthropic.com/en/docs/claude-code). Also designed to work when the skill is loaded from Codex, Grok Build, OpenCode, or agy.
 
 ![License](https://img.shields.io/badge/license-MIT-blue)
 
@@ -10,85 +10,75 @@ A [Claude Code](https://docs.anthropic.com/en/docs/claude-code) plugin from the 
 
 ## What it does
 
-Delegates tasks to other AI CLIs running in parallel. Get second opinions on architecture decisions, offload research to models with larger context windows, or run design reviews across multiple models simultaneously.
+Delegates a task to peer AI CLIs in parallel. Second opinions on architecture, research across model families, security audits, design reviews.
 
-**Grounding improvements** (integrated with the Grok "grounded-colleague" pattern):
-- Goal Cards always created at `.braintrust/goal-cards/<slug>.md` (standard location alongside `.braintrust/sessions/`). Each carries a `session_anchor` (date-based slug or session ID). By default only prior goals with the *matching anchor* (i.e. same session/thread) are considered — broader history only if explicitly requested. This works even when sessions span multiple days.
-- Skeptical Colleague 6-step protocol (restatement, assumptions, evidence, fidelity, honesty review, clear verdict) is the standard — replaces old self-critique.
-- The skill actively curates context + Goal Card before delegating. This fixes inconsistent richness from variable context the host agent chooses to share.
+**Grounding** (Skeptical Colleague + Goal Cards):
 
-Braintrust members (consulted in parallel, gated by what's installed and authenticated):
+- Goal Cards at `.braintrust/goal-cards/<slug>.md` with a `session_anchor`
+- 6-step protocol: restatement, assumptions, evidence, fidelity, honesty, GROUNDED / NOT GROUNDED
+- Host actively curates context before delegating (not "whatever is in the chat")
 
-- **Antigravity CLI (agy)** — primary Google AI path (runs your Antigravity account-tier Gemini model)
-- **Gemini CLI** — fallback Google AI path with explicit model selection (`-m`) and `@path` file context
-- **Codex** — GPT-5.x
-- **Grok Build (grok)** — Grok 4.3, a distinct xAI opinion set
-- **Claude** — via Task tool subagent
+## Members (v1.9)
 
-agy and Gemini share one "Google AI" slot (agy preferred); the others each contribute an independent opinion, so a full consult is up to four parallel voices.
+| Slot | CLI | Notes |
+|------|-----|-------|
+| Anthropic | Claude | Task tool inside Claude Code; `claude -p` from other hosts |
+| Google | **agy only** | No Gemini CLI. Account-tier model; optional `--model` |
+| OpenAI | Codex | Isolated `CODEX_HOME` + `--ignore-user-config` |
+| xAI | Grok | Default model `grok-4.5` |
+| Multi | OpenCode | User's configured/default model (probe discovers) |
+
+Up to **five** independent voices when everything is installed and authenticated. Availability is decided by `scripts/bt_probe.sh`, not by preference.
 
 ## Commands
 
 | Command | What it does |
-|---------|-------------|
-| `/braintrust` | Orchestrate a task across multiple AI CLIs |
+|---------|--------------|
+| `/braintrust` | Orchestrate a task across peer CLIs |
 | `/consult` | Alias for `/braintrust` |
 
-## Use Cases
+## v1.9.0 Highlights
 
-- Get second opinions from different models simultaneously
-- Cross-model code review (Codex `exec review` or parallel across every available CLI)
-- Validate architecture decisions
-- Parallel research across multiple models
-- Security audits with diverse model perspectives
-- Offload large-context work to Google AI (agy / gemini 1M context)
+- **Hybrid always-on skill** (eval-backed): lean launch contracts + ops appendix. Deep material in `references/` on demand.
+- **Removed Gemini CLI**; Google path is **agy only**.
+- **OpenCode** first-class member with user-default model discovery (no hardcoded vendor id).
+- **Grok** default **`grok-4.5`**; **Codex** clean `CODEX_HOME` + `--ignore-user-config`.
+- **Multi-host matrix**: Claude Code, Codex, Grok, OpenCode, agy.
+- **Scripts as assets**: `scripts/bt_probe.sh`, `scripts/bt_agy_pty.py`.
+- **Durable evals**: `bash evals/run_eval.sh matrix all agy,codex,grok,opencode`
 
-## v1.8.0 Highlights
+## Earlier (v1.8 / v1.7)
 
-- **Grounded Colleague / Skeptical Colleague protocol**: Full 6-step protocol (goal restatement, assumptions audit, evidence mandate, goal fidelity, honesty review, clear GROUNDED/NOT GROUNDED verdict) now standard. Replaces previous self-critique pattern for richer, more consistent second opinions.
-- **Goal Cards with session_anchor**: Every consult now creates/loads a Goal Card at `.braintrust/goal-cards/<slug>.md`. Includes `session_anchor` (e.g. date-based slug) so prior goals are scoped to the current session/thread by default. Broader repo history only on explicit request. Addresses "sometimes rich, sometimes not" context variability.
-- **Session-scoped history by default**: Colleague and orchestrator only reference prior Goal Cards with matching `session_anchor` unless user asks to broaden. Supports sessions spanning days via consistent anchor.
-- **Active context curation**: The skill now takes ownership of curating Goal Card + relevant context before delegating to other CLIs.
-- **Grok integration**: When Grok is available, prefers routing through the new `/grounded-colleague` skill for native high-effort persona support.
-- Updated protocol docs, templates, context packaging, invocation examples, and session saving format to include Goal Card references.
-
-## v1.7.1 Highlights
-
-- **agy actually works headless now.** `agy --print` only flushes its answer to a real TTY; as a subprocess it hangs on macOS / returns empty on Win+Linux (upstream bug [antigravity-cli#76](https://github.com/google-antigravity/antigravity-cli/issues/76), open through agy 1.0.4). braintrust now runs agy through a bundled **PTY wrapper** (`/tmp/bt_agy_pty.py`, written by the probe) that gives it a pseudo-terminal, strips ANSI, and enforces a real timeout. Verified: a bare call hangs `rc=124`; the wrapped call returns a full review in ~5-7s, so agy is a live Google AI voice again instead of "always down".
-- **Removed the broken `--print-timeout` guidance** from v1.7.0: agy's own `--print-timeout` is non-functional in headless use, so the external wrapper timeout is the only real bound.
-- **macOS keychain warm-up** added before agy calls to reduce the 1s `keyringAuth` OAuth re-prompt ([antigravity-cli#51](https://github.com/google-antigravity/antigravity-cli/issues/51)).
-- **Windows caveat documented**: the PTY trick does not help on Windows; fall back to gemini or scrape the persisted transcript.
-
-## v1.7.0 Highlights
-
-- **Codex now runs as a true clean-slate reviewer.** `codex exec --ephemeral` was never a blank slate: it loaded `~/.codex` memories, MCP servers, and the global `AGENTS.md`, which contaminated reviews (observed: a diff review that answered an unrelated project's spec pulled from a memory) and biased synthesis. Every Codex consult now runs against an isolated throwaway `CODEX_HOME` (no memories, no MCP, no global AGENTS.md). This also removes the MCP-boot startup hangs.
-- **Stop blackholing stderr.** CLI calls now capture stderr to `/tmp/bt_<cli>.err` instead of `2>/dev/null`, so failures are diagnosable. This fixed two long-standing misdiagnoses: an agy "transient empty" that is actually a hard `rc=124` timeout, and a Grok `AuthorizationRequired` that is actually a **403 billing cap** (`out of credits / spending-limit`) that `grok login` cannot fix.
-- **agy failure handling is exit-code-aware.** Cold start (retry once) vs a hard hang (`rc=124`, stop retrying and fall back to gemini) are now distinguished. Calls set an explicit `--print-timeout` so agy fails fast with its own diagnostics instead of being killed silently.
-- **Grok error detection.** Consults parse the `{"type":"error","message":...}` object and surface the real cause (e.g. billing) instead of a generic "empty/unauthenticated".
-
-## v1.6.0 Highlights
-
-- **Grok Build (Grok 4.3)** added as a first-class braintrust member. Headless: `grok -p "..." -m grok-build --output-format json | jq -r '.text'`.
-- **Default consult is now "every installed + authenticated CLI"** (up to four voices), not a fixed three.
-- **Reliability fix for agy ↔ gemini "thrashing"**: the model probe now uses generous cold-start timeouts and a warm-up retry per CLI, so a slow first call no longer false-negatives a CLI and silently flips the Google AI path.
-- **Gemini default model is now `gemini-3.1-pro-preview`** (newest-best first). Dogfooding showed `gemini-2.5-pro` was actually the *flakier* model on current accounts; it is now a fallback only.
-- **agy vs Gemini model paths documented**: agy has no `-m` flag and runs your account-tier model; Gemini lets you pick the exact model. They are different access paths, not interchangeable.
-- **June 18, 2026 sunset**: Gemini CLI free-tier/OAuth access ends. agy is the primary path; the probe handles the switch automatically.
+- Skeptical Colleague + Goal Cards + session_anchor
+- agy PTY workaround for antigravity-cli#76
+- Codex clean-slate via isolated `CODEX_HOME`
+- stderr capture instead of blackholing failures
+- Grok billing-cap diagnosis via JSON error body
 
 ## Requirements
 
-All CLIs are optional; braintrust consults whichever are installed and authenticated.
+All peers optional; braintrust uses whatever the probe authenticates.
 
-- [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) — always available as a subagent from Claude Code
-- [Antigravity CLI (agy)](https://antigravity.google/product/antigravity-cli) — `curl -fsSL https://antigravity.google/cli/install.sh | bash` (primary Google AI path)
-- [Codex CLI](https://github.com/openai/codex)
-- [Grok Build (grok)](https://x.ai) — `curl -fsSL https://x.ai/cli/install.sh | bash`, then `grok login` *(needs a Grok subscription for `grok-build`)*
-- [Gemini CLI](https://github.com/google-gemini/gemini-cli) *(power-user fallback for explicit model selection / `@path`; free-tier sunset 2026-06-18)*
+- [Claude Code](https://docs.anthropic.com/en/docs/claude-code)
+- [Antigravity CLI (agy)](https://antigravity.google/product/antigravity-cli) — `curl -fsSL https://antigravity.google/cli/install.sh | bash`
+- [Codex CLI](https://developers.openai.com/codex)
+- [Grok Build](https://docs.x.ai/build/overview) — `curl -fsSL https://x.ai/cli/install.sh | bash`
+- [OpenCode](https://opencode.ai/docs/cli/) — with an authed provider; set `"model"` in `~/.config/opencode/opencode.json` so headless matches your TUI default
+
+`jq` required for Codex / Grok / OpenCode JSON parsing.
 
 ## Install
 
 ```
 claude plugins install braintrust@not-my-job
+```
+
+## Refresh / dogfood / evals
+
+```bash
+bash scripts/bt_probe.sh
+bash evals/run_eval.sh matrix all agy,codex,grok,opencode
+# deeper harness drift notes: skills/braintrust/references/self-improvement.md
 ```
 
 ## License

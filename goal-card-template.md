@@ -21,8 +21,18 @@
 - Stack / key files at time of card creation: ...
 - Original request / ticket: ...
 
+## Access / Capability Map (optional but recommended when non-obvious)
+| Peer role | Mode (A–G) | May use | Must not |
+|-----------|------------|---------|----------|
+| e.g. Claude verifier | D file-capable | paths under `src/`, `evidence/*` | network write, invent facts |
+| e.g. Codex adjudicator | B inline | prompt package only | MCP, host memories |
+| e.g. Grok red-team | F | same package as Codex | tools thrash |
+| e.g. agy | C repo walker | project root / `--add-dir` | client surnames not in files |
+
+Modes: A text-only · B inline package · C repo walker · D file verifier · E vision · F red-team · G MCP-assisted (allowlist + fallback). See `skills/braintrust/references/capability-packaging.md`.
+
 ## Decision Log (add as work progresses)
 - [Date] Decision: ... Rationale: ... (Grounded because: ...)
 
 ---
-*This Goal Card must be read and explicitly referenced by any braintrust member before giving an opinion. All claims must be grounded against it + fresh tool evidence.*
+*This Goal Card must be read and explicitly referenced by any braintrust member before giving an opinion. All claims must be grounded against it + fresh evidence allowed by the capability map.*

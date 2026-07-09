@@ -1,5 +1,5 @@
 ---
-description: Consult your AI braintrust (Antigravity/agy, Gemini, Codex, Grok, Claude) for second opinions and research
+description: Consult your AI braintrust (agy, Codex, Grok, OpenCode, Claude) for second opinions and research
 disable-model-invocation: true
 ---
 

@@ -35,3 +35,6 @@ build/
 
 # Project-specific
 .braintrust/
+
+# Eval run artifacts (fixtures + runner stay tracked)
+evals/runs/

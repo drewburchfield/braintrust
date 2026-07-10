@@ -72,7 +72,8 @@ Treat local `--help` + dogfood as higher priority than blog posts.
 
 ## Exit criteria for a refresh
 
-- [ ] Probe writes a complete `/tmp/bt_models.env`
+- [ ] Probe writes a complete `/tmp/bt_models.env` (includes `bt_codex_model=gpt-5.6-sol` when Sol works)
+- [ ] Codex CLI ≥ 0.144.0 when using GPT-5.6 Sol (`codex --version`)
 - [ ] Every `bt_*=true` CLI returns a one-word headless ok
 - [ ] SKILL + references mention no `gemini` binary path
 - [ ] Default Grok model matches `grok models`

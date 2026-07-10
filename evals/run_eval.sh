@@ -101,8 +101,14 @@ run_peer() {
         echo "SKIPPED unavailable" >"$outdir/result.txt"; return
       fi
       local home="${bt_codex_home:-/tmp/bt-codex-home}"
+      local model_args=()
+      if [[ -n "${bt_codex_model+x}" && -z "${bt_codex_model}" ]]; then
+        model_args=()
+      else
+        model_args=(-m "${bt_codex_model:-gpt-5.6-sol}")
+      fi
       CODEX_HOME="$home" timeout 150 codex exec --ephemeral --ignore-user-config \
-        -s read-only --json --skip-git-repo-check -C "${TMPDIR:-/tmp}" "$q" \
+        -s read-only --json --skip-git-repo-check "${model_args[@]}" -C "${TMPDIR:-/tmp}" "$q" \
         </dev/null 2>"$outdir/stderr.txt" >"$outdir/raw.jsonl" || true
       jq -rs 'map(select(.item.type? == "agent_message")) | last | .item.text // empty' \
         "$outdir/raw.jsonl" >"$outdir/result.txt" 2>/dev/null || true

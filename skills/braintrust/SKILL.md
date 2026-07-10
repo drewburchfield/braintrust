@@ -17,7 +17,7 @@ Consult peer AI CLIs in parallel for second opinions. **No Gemini CLI.**
 |------|-----|---------|
 | Anthropic | Claude | Task tool inside Claude Code; else `claude -p --model sonnet --output-format json` |
 | Google | **agy only** | `agy --print "$Q" --dangerously-skip-permissions` (PTY wrapper if bare hangs) |
-| OpenAI | Codex | Isolated clean profile |
+| OpenAI | Codex | **`gpt-5.6-sol`** (GPT-5.6 Sol); isolated clean profile; Codex CLI ≥ 0.144.0 |
 | xAI | Grok | `grok-4.5` |
 | Multi | OpenCode | User default model from probe |
 
@@ -87,17 +87,31 @@ timeout 120 agy --print "$QUERY" --dangerously-skip-permissions 2>/tmp/bt_agy.er
 # NEVER fall back to gemini CLI; skip Google slot and note the gap
 ```
 
-### Codex (identity isolated; workspace optional)
+### Codex (GPT-5.6 Sol primary; identity isolated; workspace optional)
+
+Primary model: **`gpt-5.6-sol`** (OpenAI GPT-5.6 Sol). Requires **Codex CLI ≥ 0.144.0** (`npm i -g @openai/codex@latest`). Because consults use `--ignore-user-config`, always pass **`-m`** explicitly; the user's `~/.codex/config.toml` model pin is ignored.
 
 ```bash
 source /tmp/bt_models.env 2>/dev/null
+# Prefer probe pin; default Sol. Empty bt_codex_model = product default (Sol unavailable at probe).
+CODEX_MODEL_ARGS=()
+if [ -n "${bt_codex_model+x}" ] && [ -z "${bt_codex_model}" ]; then
+  : # explicit empty: do not pass -m
+elif [ -n "${bt_codex_model:-}" ]; then
+  CODEX_MODEL_ARGS=(-m "$bt_codex_model")
+else
+  CODEX_MODEL_ARGS=(-m "gpt-5.6-sol")
+fi
 CODEX_HOME="${bt_codex_home:-/tmp/bt-codex-home}" \
   timeout 150 codex exec --ephemeral --ignore-user-config -s read-only --json --skip-git-repo-check \
+  "${CODEX_MODEL_ARGS[@]}" \
   -C "${TMPDIR:-/tmp}" "$QUERY" < /dev/null 2>/tmp/bt_codex.err > /tmp/codex.json
 jq -rs 'map(select(.item.type? == "agent_message")) | last | .item.text' /tmp/codex.json
 ```
 
-For repo walk: same isolation, set `-C` to the repo. Always close stdin.  
+If stderr/JSON says Sol needs a newer Codex, upgrade (`npm i -g @openai/codex@latest`) and re-run the probe. Prefer fixing Sol over relying on product default.
+
+For repo walk: same isolation + Sol pin, set `-C` to the repo. Always close stdin.  
 **`-C` alone is not isolation.** Off-topic answers usually mean missing clean `CODEX_HOME` and/or `--ignore-user-config` (memories/MCP/user config still loaded).
 
 ### Grok

@@ -7,7 +7,7 @@ Source of truth for invocation shapes. Re-verify with `scripts/bt_probe.sh` and 
 | Slot | Binary | Default model | Headless contract |
 |------|--------|---------------|-------------------|
 | Google AI | `agy` | account-tier (optional `--model`) | PTY if needed; `--print` + `--dangerously-skip-permissions` |
-| OpenAI | `codex` | product default (gpt-5.x) | `exec --ephemeral --ignore-user-config -s read-only --json --skip-git-repo-check` + isolated `CODEX_HOME` + `< /dev/null` |
+| OpenAI | `codex` | **`gpt-5.6-sol`** (GPT-5.6 Sol; CLI ≥ 0.144.0) | `exec --ephemeral --ignore-user-config -s read-only --json --skip-git-repo-check -m gpt-5.6-sol` + isolated `CODEX_HOME` + `< /dev/null` |
 | xAI | `grok` | `grok-4.5` | `-p` + `-m` + `--output-format json` → `jq` `.text` (check `.type=="error"` first) |
 | Multi-provider | `opencode` | **User default** (config `model`, else last non-free session) | `run --format json --auto --pure` (+ `-m` only when probe set a model) → last `type=="text"` event |
 | Anthropic | `claude` | `sonnet` | Host Claude Code: **Task tool**. Other hosts: `claude -p --model sonnet --output-format json` → `.result` |
@@ -20,7 +20,7 @@ Source of truth for invocation shapes. Re-verify with `scripts/bt_probe.sh` and 
 |-----|---------|-------|
 | claude | 2.1.205 | Nested `claude -p` blocked inside Claude Code |
 | agy | 1.1.0 | Bare piped `--print` works; PTY kept as fallback. Has `--model` and `agy models` |
-| codex | 0.143.0 | `--ignore-user-config` available; `codex review` is top-level (not only `exec review`) |
+| codex | **0.144.0+** (Sol); 0.143.x too old for `gpt-5.6-sol` | `-m gpt-5.6-sol`; `--ignore-user-config`; `codex review` is top-level |
 | grok | 0.2.93 | Default model **`grok-4.5`** (not `grok-build`) |
 | opencode | 1.17.15 | `run --format json --auto --pure`; model = user config / last TUI (not hardcoded) |
 
@@ -43,15 +43,21 @@ fi
 
 ## Codex
 
+Primary model: **`gpt-5.6-sol`** (GPT-5.6 Sol). Min CLI **0.144.0+**. Always pass `-m` with `--ignore-user-config` (user config model pin is ignored).
+
 ```bash
 source /tmp/bt_models.env 2>/dev/null
+CODEX_MODEL_ARGS=(-m "${bt_codex_model:-gpt-5.6-sol}")
+[ -n "${bt_codex_model+x}" ] && [ -z "${bt_codex_model}" ] && CODEX_MODEL_ARGS=()
 CODEX_HOME="${bt_codex_home:-/tmp/bt-codex-home}" \
   codex exec --ephemeral --ignore-user-config -s read-only --json --skip-git-repo-check \
+  "${CODEX_MODEL_ARGS[@]}" \
   -C "${TMPDIR:-/tmp}" "$QUERY" < /dev/null 2>/tmp/bt_codex.err > /tmp/codex.json
 jq -rs 'map(select(.item.type? == "agent_message")) | last | .item.text' /tmp/codex.json
 ```
 
 - **Identity isolation is mandatory for unbiased review.** Isolated `CODEX_HOME` (auth only) + `--ignore-user-config`. This is separate from workspace access.
+- **Model:** default `gpt-5.6-sol`. Probe writes `bt_codex_model`. Empty means product default (Sol unavailable; upgrade CLI).
 - **Workspace:** `-C /tmp` + inline evidence (Mode B default), or cwd/repo when Mode C (keep isolated home either way).
 - Always close stdin with `< /dev/null`. Stderr may still print `Reading additional input from stdin...`; that line alone is **not** a hang if JSONL completed.
 - Code review shortcut: `codex review --uncommitted` (top-level) or `codex exec review --uncommitted`. Untracked files need staging or inline context.

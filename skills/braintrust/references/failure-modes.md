@@ -69,9 +69,10 @@ bash "${CLAUDE_PLUGIN_ROOT:-$(pwd)}/scripts/bt_probe.sh"
 # agy
 timeout 60 agy --print "say ok" --dangerously-skip-permissions 2>/tmp/bt_agy.err | head -3
 
-# codex
+# codex (GPT-5.6 Sol primary; CLI >= 0.144.0)
 CODEX_HOME="${bt_codex_home:-/tmp/bt-codex-home}" \
   codex exec --ephemeral --ignore-user-config -s read-only --json --skip-git-repo-check \
+  -m "${bt_codex_model:-gpt-5.6-sol}" \
   -C "${TMPDIR:-/tmp}" "say ok" < /dev/null 2>/tmp/bt_codex.err | head -5
 
 # grok

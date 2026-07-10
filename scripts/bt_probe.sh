@@ -13,6 +13,8 @@
 #  * Gemini CLI is NOT probed. Google voice = agy only.
 #  * Grok default model is grok-4.5 (grok-build is gone).
 #  * Codex uses isolated CODEX_HOME + --ignore-user-config for clean-slate.
+#  * Codex primary model is gpt-5.6-sol (GPT-5.6 Sol). Requires Codex CLI >= 0.144.0.
+#    Because --ignore-user-config is set, we MUST pass -m explicitly (user config is ignored).
 #  * OpenCode uses the user's configured/default model (opencode.json "model",
 #    else last non-free session model). Never hardcode a specific GLM id.
 #  * agy 1.1.0+ often works bare-piped; PTY wrapper is durable fallback.
@@ -120,18 +122,42 @@ probe_agy() {
   fi
 }
 
-# --- Codex (isolated clean-slate + ignore-user-config) ---
+# --- Codex (isolated clean-slate + ignore-user-config; primary model gpt-5.6-sol) ---
+# GPT-5.6 Sol is the flagship OpenAI model for this slot. Model id: gpt-5.6-sol.
+# Requires Codex CLI >= 0.144.0. Older CLIs return 400 "requires a newer version of Codex".
 probe_codex() {
-  echo "bt_codex_available=false" > "$D/codex.env"
+  printf 'bt_codex_available=false\nbt_codex_model=gpt-5.6-sol\n' > "$D/codex.env"
   command -v codex &>/dev/null || { echo "Codex: not installed" > "$D/codex.log"; return; }
-  local out rc
-  for a in 1 2; do
-    out=$(rt 60 env CODEX_HOME="$bt_codex_home" codex exec --ephemeral --ignore-user-config -s read-only --json --skip-git-repo-check -C "${TMPDIR:-/tmp}" "Reply with the single word: ok" < /dev/null 2>/dev/null | jq -rs 'map(select(.item.type? == "agent_message")) | last | .item.text' 2>/dev/null); rc=${PIPESTATUS[0]:-0}
-    [ -n "$out" ] && [ "$out" != "null" ] && { echo "bt_codex_available=true" > "$D/codex.env"; break; }
-    [ "$rc" = "124" ] && break
+  local out rc model="" ver
+  ver=$(codex --version 2>/dev/null | head -1)
+  # Prefer Sol; fall back to product default only if Sol is unavailable (old CLI / no access).
+  for model in "gpt-5.6-sol" ""; do
+    for a in 1 2; do
+      if [ -n "$model" ]; then
+        out=$(rt 70 env CODEX_HOME="$bt_codex_home" codex exec --ephemeral --ignore-user-config -s read-only --json --skip-git-repo-check -m "$model" -C "${TMPDIR:-/tmp}" "Reply with the single word: ok" < /dev/null 2>/dev/null | jq -rs 'map(select(.item.type? == "agent_message")) | last | .item.text' 2>/dev/null); rc=${PIPESTATUS[0]:-0}
+      else
+        out=$(rt 70 env CODEX_HOME="$bt_codex_home" codex exec --ephemeral --ignore-user-config -s read-only --json --skip-git-repo-check -C "${TMPDIR:-/tmp}" "Reply with the single word: ok" < /dev/null 2>/dev/null | jq -rs 'map(select(.item.type? == "agent_message")) | last | .item.text' 2>/dev/null); rc=${PIPESTATUS[0]:-0}
+      fi
+      if [ -n "$out" ] && [ "$out" != "null" ]; then
+        printf 'bt_codex_available=true\nbt_codex_model=%s\n' "${model:-}" > "$D/codex.env"
+        break 2
+      fi
+      [ "$rc" = "124" ] && break
+    done
   done
-  grep -q true "$D/codex.env" && echo "Codex: available [isolated home + --ignore-user-config]" > "$D/codex.log" \
-    || echo "Codex: empty/timeout after warm-up retry" > "$D/codex.log"
+  if grep -q 'bt_codex_available=true' "$D/codex.env"; then
+    # shellcheck disable=SC1090
+    . "$D/codex.env"
+    if [ "${bt_codex_model:-}" = "gpt-5.6-sol" ]; then
+      echo "Codex: available ($ver; model=gpt-5.6-sol / GPT-5.6 Sol; isolated + --ignore-user-config)" > "$D/codex.log"
+    elif [ -z "${bt_codex_model:-}" ]; then
+      echo "Codex: available ($ver; product default; Sol unavailable — upgrade to Codex CLI >= 0.144.0 for gpt-5.6-sol)" > "$D/codex.log"
+    else
+      echo "Codex: available ($ver; model=${bt_codex_model}; isolated + --ignore-user-config)" > "$D/codex.log"
+    fi
+  else
+    echo "Codex: empty/timeout after Sol + default warm-up ($ver). For GPT-5.6 Sol need CLI >= 0.144.0: npm i -g @openai/codex@latest" > "$D/codex.log"
+  fi
 }
 
 # --- Grok (Grok Build; default model is grok-4.5 as of 2026-07) ---
@@ -287,6 +313,7 @@ bt_agy_needs_pty=${bt_agy_needs_pty:-false}
 bt_agy_model=${bt_agy_model:-}
 bt_codex_available=${bt_codex_available:-false}
 bt_codex_home=${bt_codex_home:-${TMPDIR:-/tmp}/bt-codex-home}
+bt_codex_model=${bt_codex_model-gpt-5.6-sol}
 bt_grok_available=${bt_grok_available:-false}
 bt_grok_model=${bt_grok_model:-grok-4.5}
 bt_grok_fast=${bt_grok_fast:-grok-composer-2.5-fast}
@@ -295,7 +322,7 @@ bt_opencode_model=${bt_opencode_model:-}
 bt_claude_cli_available=${bt_claude_cli_available:-false}
 bt_claude_model=${bt_claude_model:-sonnet}
 bt_probe_ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-bt_probe_version=1.9.0
+bt_probe_version=1.10.0
 EOF
 
 rm -rf "$D"

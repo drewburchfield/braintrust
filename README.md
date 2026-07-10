@@ -18,13 +18,13 @@ Delegates a task to peer AI CLIs in parallel. Second opinions on architecture, r
 - 6-step protocol: restatement, assumptions, evidence, fidelity, honesty, GROUNDED / NOT GROUNDED
 - Host actively curates context before delegating (not "whatever is in the chat")
 
-## Members (v1.9)
+## Members (v1.10)
 
 | Slot | CLI | Notes |
 |------|-----|-------|
 | Anthropic | Claude | Task tool inside Claude Code; `claude -p` from other hosts |
 | Google | **agy only** | No Gemini CLI. Account-tier model; optional `--model` |
-| OpenAI | Codex | Isolated `CODEX_HOME` + `--ignore-user-config` |
+| OpenAI | Codex | **`gpt-5.6-sol`** (GPT-5.6 Sol); isolated `CODEX_HOME` + `--ignore-user-config`; CLI ≥ **0.144.0** |
 | xAI | Grok | Default model `grok-4.5` |
 | Multi | OpenCode | User's configured/default model (probe discovers) |
 
@@ -37,23 +37,17 @@ Up to **five** independent voices when everything is installed and authenticated
 | `/braintrust` | Orchestrate a task across peer CLIs |
 | `/consult` | Alias for `/braintrust` |
 
-## v1.9.0 Highlights
+## v1.10.0 Highlights
 
-- **Hybrid always-on skill** (eval-backed): lean launch contracts + ops appendix. Deep material in `references/` on demand.
-- **Removed Gemini CLI**; Google path is **agy only**.
-- **OpenCode** first-class member with user-default model discovery (no hardcoded vendor id).
-- **Grok** default **`grok-4.5`**; **Codex** clean `CODEX_HOME` + `--ignore-user-config`.
-- **Multi-host matrix**: Claude Code, Codex, Grok, OpenCode, agy.
-- **Scripts as assets**: `scripts/bt_probe.sh`, `scripts/bt_agy_pty.py`.
-- **Durable evals**: `bash evals/run_eval.sh matrix all agy,codex,grok,opencode`
+- **Codex primary model: GPT-5.6 Sol** (`gpt-5.6-sol`). Explicit `-m` because consults use `--ignore-user-config` (user config model pin is ignored).
+- Probe prefers Sol, falls back to product default if Sol is unavailable, and records `bt_codex_model`.
+- Documented minimum **Codex CLI 0.144.0+** for Sol (`npm i -g @openai/codex@latest`).
 
-## Earlier (v1.8 / v1.7)
+## Earlier (v1.9)
 
-- Skeptical Colleague + Goal Cards + session_anchor
-- agy PTY workaround for antigravity-cli#76
-- Codex clean-slate via isolated `CODEX_HOME`
-- stderr capture instead of blackholing failures
-- Grok billing-cap diagnosis via JSON error body
+- Hybrid always-on skill (eval-backed); Gemini CLI removed; OpenCode user-default model discovery
+- Grok default `grok-4.5`; Codex clean `CODEX_HOME` + `--ignore-user-config`
+- Multi-host matrix; durable evals under `evals/`
 
 ## Requirements
 
@@ -61,7 +55,7 @@ All peers optional; braintrust uses whatever the probe authenticates.
 
 - [Claude Code](https://docs.anthropic.com/en/docs/claude-code)
 - [Antigravity CLI (agy)](https://antigravity.google/product/antigravity-cli) — `curl -fsSL https://antigravity.google/cli/install.sh | bash`
-- [Codex CLI](https://developers.openai.com/codex)
+- [Codex CLI](https://developers.openai.com/codex) — **≥ 0.144.0** for GPT-5.6 Sol (`npm i -g @openai/codex@latest`)
 - [Grok Build](https://docs.x.ai/build/overview) — `curl -fsSL https://x.ai/cli/install.sh | bash`
 - [OpenCode](https://opencode.ai/docs/cli/) — with an authed provider; set `"model"` in `~/.config/opencode/opencode.json` so headless matches your TUI default
 

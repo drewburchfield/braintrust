@@ -7,7 +7,7 @@ Consult peer AI CLIs in parallel for second opinions. **No Gemini CLI.**
 |------|-----|---------|
 | Anthropic | Claude | Task tool inside Claude Code; else `claude -p --model sonnet --output-format json` |
 | Google | **agy only** | `agy --print "$Q" --dangerously-skip-permissions` (PTY wrapper if bare hangs) |
-| OpenAI | Codex | Isolated clean profile |
+| OpenAI | Codex | **gpt-5.6-sol** (GPT-5.6 Sol); isolated clean profile; CLI ≥ 0.144.0 |
 | xAI | Grok | `grok-4.5` |
 | Multi | OpenCode | User default model from probe |
 
@@ -39,14 +39,15 @@ timeout 120 agy --print "$QUERY" --dangerously-skip-permissions
 # NEVER fall back to gemini CLI; skip Google slot and note the gap
 ```
 
-**Codex (identity isolated; workspace optional):**
+**Codex (GPT-5.6 Sol primary; identity isolated; workspace optional):**
 ```bash
 CODEX_HOME="${bt_codex_home:-/tmp/bt-codex-home}" \
   timeout 150 codex exec --ephemeral --ignore-user-config -s read-only --json --skip-git-repo-check \
+  -m "${bt_codex_model:-gpt-5.6-sol}" \
   -C "${TMPDIR:-/tmp}" "$QUERY" < /dev/null 2>/tmp/bt_codex.err > /tmp/codex.json
 jq -rs 'map(select(.item.type? == "agent_message")) | last | .item.text' /tmp/codex.json
 ```
-For repo walk: same isolation, set `-C` to the repo. Always close stdin.  
+Primary model: **`gpt-5.6-sol`**. Codex CLI ≥ 0.144.0. Always pass `-m` with `--ignore-user-config`. For repo walk: same isolation + Sol pin, set `-C` to the repo. Always close stdin.  
 **`-C` alone is not isolation.** Off-topic answers usually mean missing clean `CODEX_HOME` and/or `--ignore-user-config` (memories/MCP/user config still loaded).
 
 **Grok:**

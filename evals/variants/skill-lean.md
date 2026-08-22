@@ -5,11 +5,11 @@ Consult peer AI CLIs in parallel for second opinions. **No Gemini CLI.**
 ## Members
 | Slot | CLI | Default |
 |------|-----|---------|
-| Anthropic | Claude | Task tool inside Claude Code; else `claude -p --model sonnet --output-format json` |
-| Google | **agy only** | `agy --print "$Q" --dangerously-skip-permissions` (PTY wrapper if bare hangs) |
+| Anthropic | Claude | Task tool inside Claude Code; else `claude -p --model opus --output-format json` |
+| Google | **agy only** | `gemini-3.7-flash-high`; `agy --print` + `--output-format json` + `--dangerously-skip-permissions` (PTY wrapper if bare hangs) |
 | OpenAI | Codex | **gpt-5.6-sol** (GPT-5.6 Sol); isolated clean profile; CLI ≥ 0.144.0 |
-| xAI | Grok | `grok-4.5` |
-| Multi | OpenCode | User default model from probe |
+| xAI | Grok | `grok-4.6` |
+| Multi | OpenCode | User default model from probe; `--variant max` when id contains `glm-5.3` |
 
 Skip any CLI the probe marks unavailable. Host never peers with itself.
 
@@ -23,11 +23,12 @@ Cache: `/tmp/bt_models.env`
 
 ## Launch (copy)
 
-**Claude Code host → Claude peer:** Task tool `general-purpose` (never nested `claude -p`).
+**Claude Code host → Claude peer:** Task tool `general-purpose` (never nested `claude -p`). Prefer model opus.
 
 **agy:**
 ```bash
-timeout 120 agy --print "$QUERY" --dangerously-skip-permissions
+timeout 120 agy --print "$QUERY" --dangerously-skip-permissions --output-format json \
+  ${bt_agy_model:+--model "$bt_agy_model"}
 # if empty/timeout: python3 /tmp/bt_agy_pty.py 120 agy --print "$QUERY" --dangerously-skip-permissions
 # NEVER fall back to gemini CLI
 ```
@@ -44,7 +45,7 @@ Primary model id: **`gpt-5.6-sol`**. Requires Codex CLI ≥ 0.144.0. Always pass
 
 **Grok:**
 ```bash
-timeout 120 grok -p "$QUERY" -m "${bt_grok_model:-grok-4.5}" --output-format json --disable-web-search 2>/tmp/bt_grok.err \
+timeout 120 grok --no-auto-update -p "$QUERY" -m "${bt_grok_model:-grok-4.6}" --output-format json --disable-web-search 2>/tmp/bt_grok.err \
   | jq -r 'if .type=="error" then "GROK_FAILED: "+.message else .text end'
 ```
 
@@ -52,6 +53,7 @@ timeout 120 grok -p "$QUERY" -m "${bt_grok_model:-grok-4.5}" --output-format jso
 ```bash
 OC_ARGS=(run --format json --auto --pure)
 [ -n "${bt_opencode_model:-}" ] && OC_ARGS+=(-m "$bt_opencode_model")
+[ -n "${bt_opencode_variant:-}" ] && OC_ARGS+=(--variant "$bt_opencode_variant")
 timeout 120 opencode "${OC_ARGS[@]}" "$QUERY" 2>/tmp/bt_opencode.err \
   | jq -rs 'map(select(.type=="text") | .part.text // .text // empty) | map(select(length>0)) | last'
 ```

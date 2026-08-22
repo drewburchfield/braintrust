@@ -93,8 +93,11 @@ run_peer() {
       if [[ "${bt_agy_available:-true}" != "true" ]] && [[ "${bt_agy_available:-}" == "false" ]]; then
         echo "SKIPPED unavailable" >"$outdir/result.txt"; return
       fi
-      timeout 150 agy --print "$q" --dangerously-skip-permissions \
-        >"$outdir/result.txt" 2>"$outdir/stderr.txt" || true
+      local agy_args=(--print "$q" --dangerously-skip-permissions --output-format json)
+      [[ -n "${bt_agy_model:-}" ]] && agy_args+=(--model "$bt_agy_model")
+      timeout 150 agy "${agy_args[@]}" 2>"$outdir/stderr.txt" \
+        | jq -r 'if .status=="SUCCESS" then .response else empty end' \
+        >"$outdir/result.txt" || true
       ;;
     codex)
       if [[ "${bt_codex_available:-true}" == "false" ]]; then
@@ -110,14 +113,18 @@ run_peer() {
       CODEX_HOME="$home" timeout 150 codex exec --ephemeral --ignore-user-config \
         -s read-only --json --skip-git-repo-check "${model_args[@]}" -C "${TMPDIR:-/tmp}" "$q" \
         </dev/null 2>"$outdir/stderr.txt" >"$outdir/raw.jsonl" || true
-      jq -rs 'map(select(.item.type? == "agent_message")) | last | .item.text // empty' \
-        "$outdir/raw.jsonl" >"$outdir/result.txt" 2>/dev/null || true
+      jq -rs '
+        (map(select(.type=="error" or .type=="turn.failed")) | last) as $err
+        | if $err then empty
+          else map(select(.item.type? == "agent_message")) | last | .item.text // empty
+          end
+      ' "$outdir/raw.jsonl" >"$outdir/result.txt" 2>/dev/null || true
       ;;
     grok)
       if [[ "${bt_grok_available:-true}" == "false" ]]; then
         echo "SKIPPED unavailable" >"$outdir/result.txt"; return
       fi
-      timeout 150 grok -p "$q" -m "${bt_grok_model:-grok-4.5}" \
+      timeout 150 grok --no-auto-update -p "$q" -m "${bt_grok_model:-grok-4.6}" \
         --output-format json --disable-web-search \
         2>"$outdir/stderr.txt" \
         | jq -r 'if .type=="error" then "GROK_FAILED: "+.message else .text end' \
@@ -129,15 +136,20 @@ run_peer() {
       fi
       local args=(run --format json --auto --pure)
       [[ -n "${bt_opencode_model:-}" ]] && args+=(-m "$bt_opencode_model")
+      [[ -n "${bt_opencode_variant:-}" ]] && args+=(--variant "$bt_opencode_variant")
       timeout 150 opencode "${args[@]}" "$q" 2>"$outdir/stderr.txt" \
-        | jq -rs 'map(select(.type=="text") | .part.text // .text // empty) | map(select(length>0)) | last // empty' \
-        >"$outdir/result.txt" || true
+        | jq -rs '
+            (map(select(.type=="error")) | last) as $err
+            | if $err then empty
+              else map(select(.type=="text") | .part.text // .text // empty) | map(select(length>0)) | last // empty
+              end
+          ' >"$outdir/result.txt" || true
       ;;
     claude)
       if [[ "${bt_claude_cli_available:-true}" == "false" ]]; then
         echo "SKIPPED unavailable" >"$outdir/result.txt"; return
       fi
-      timeout 150 claude -p "$q" --model "${bt_claude_model:-sonnet}" --output-format json \
+      timeout 150 claude -p "$q" --model "${bt_claude_model:-opus}" --output-format json \
         2>"$outdir/stderr.txt" \
         | jq -r '.result // empty' >"$outdir/result.txt" || true
       ;;
@@ -196,7 +208,7 @@ score_result() {
   echo "$t" | grep -qiE 'opencode run' && echo "$t" | grep -qiE -- '--pure|bt_opencode_model|-m' \
     && { score=$((score+1)); notes+=("Q3"); } || true
 
-  echo "$t" | grep -qiE 'grok-4\.5' && echo "$t" | grep -qiE -- '-p|headless|output-format json' \
+  echo "$t" | grep -qiE 'grok-4\.6' && echo "$t" | grep -qiE -- '-p|headless|output-format json' \
     && { score=$((score+1)); notes+=("Q4"); } || true
 
   echo "$t" | grep -qiE 'agy' && echo "$t" | grep -qiE -- '--print' \

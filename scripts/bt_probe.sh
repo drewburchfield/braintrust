@@ -9,14 +9,17 @@
 #   # or, when skill is installed as a plugin:
 #   bash "${CLAUDE_PLUGIN_ROOT:-.}/scripts/bt_probe.sh"
 #
-# Design notes (2026-07 dogfood):
+# Design notes (2026-08 dogfood):
 #  * Gemini CLI is NOT probed. Google voice = agy only.
-#  * Grok default model is grok-4.5 (grok-build is gone).
+#  * Grok default comes from `grok models` ("Default model:"); fallback grok-4.6.
 #  * Codex uses isolated CODEX_HOME + --ignore-user-config for clean-slate.
 #  * Codex primary model is gpt-5.6-sol (GPT-5.6 Sol). Requires Codex CLI >= 0.144.0.
 #    Because --ignore-user-config is set, we MUST pass -m explicitly (user config is ignored).
 #  * OpenCode uses the user's configured/default model (opencode.json "model",
 #    else last non-free session model). Never hardcode a specific GLM id.
+#    If the resolved id contains glm-5.3, set bt_opencode_variant=max (thinking).
+#  * agy default Google pin is gemini-3.7-flash-high when `agy models` lists it.
+#  * Claude consult default is opus (liveness probe uses haiku).
 #  * agy 1.1.0+ often works bare-piped; PTY wrapper is durable fallback.
 
 set -u
@@ -101,22 +104,38 @@ fi
 security find-generic-password -s "Antigravity Safe Storage" >/dev/null 2>&1 || true
 
 # --- Antigravity (agy) - ONLY Google path ---
+# Pin Gemini 3.7 Flash High when the account lists it. Parse --output-format json
+# (.status / .response). Text + PTY remain fallbacks for older CLIs / hangs.
 probe_agy() {
   printf 'bt_agy_available=false\nbt_agy_needs_pty=false\nbt_agy_model=\n' > "$D/agy.env"
   command -v agy &>/dev/null || { echo "Antigravity (agy): not installed" > "$D/agy.log"; return; }
-  local out rc needs_pty=false
-  # Prefer bare print (works on 1.1.0+); fall back to PTY on hang/empty
-  out=$(rt 45 agy --print "Reply with the single word: ok" --dangerously-skip-permissions 2>/dev/null | head -5); rc=$?
-  if ! echo "$out" | grep -qi ok; then
-    if [ "$rc" = "124" ] || [ -z "$out" ]; then
-      out=$(python3 /tmp/bt_agy_pty.py 60 agy --print "Reply with the single word: ok" --dangerously-skip-permissions 2>/dev/null | head -5); rc=$?
+  local model="" listing out rc needs_pty=false response=""
+  listing=$(agy models 2>/dev/null) || true
+  if printf '%s\n' "$listing" | grep -q 'gemini-3.7-flash-high'; then
+    model="gemini-3.7-flash-high"
+  fi
+  local args=(agy --print "Reply with the single word: ok" --dangerously-skip-permissions --output-format json)
+  [ -n "$model" ] && args+=(--model "$model")
+  out=$(rt 45 "${args[@]}" 2>/dev/null); rc=$?
+  response=$(printf '%s\n' "$out" | jq -r '.response // empty' 2>/dev/null)
+  if ! echo "$response" | grep -qi ok; then
+    args=(agy --print "Reply with the single word: ok" --dangerously-skip-permissions)
+    [ -n "$model" ] && args+=(--model "$model")
+    out=$(rt 45 "${args[@]}" 2>/dev/null | head -5); rc=$?
+    response=$out
+  fi
+  if ! echo "$response" | grep -qi ok; then
+    if [ "$rc" = "124" ] || [ -z "$response" ]; then
+      args=(agy --print "Reply with the single word: ok" --dangerously-skip-permissions)
+      [ -n "$model" ] && args+=(--model "$model")
+      out=$(python3 /tmp/bt_agy_pty.py 60 "${args[@]}" 2>/dev/null | head -5); rc=$?
       needs_pty=true
+      response=$out
     fi
   fi
-  if echo "$out" | grep -qi ok; then
-    # Default: account-tier model (no --model). Set bt_agy_model only when user/probe pins one.
-    printf 'bt_agy_available=true\nbt_agy_needs_pty=%s\nbt_agy_model=\n' "$needs_pty" > "$D/agy.env"
-    echo "Antigravity (agy): available [Google AI only; pty=$needs_pty; account-tier model]" > "$D/agy.log"
+  if echo "$response" | grep -qi ok; then
+    printf 'bt_agy_available=true\nbt_agy_needs_pty=%s\nbt_agy_model=%s\n' "$needs_pty" "$model" > "$D/agy.env"
+    echo "Antigravity (agy): available [Google AI only; pty=$needs_pty; model=${model:-account-tier}]" > "$D/agy.log"
   else
     echo "Antigravity (agy): empty/timeout (auth or quota)" > "$D/agy.log"
   fi
@@ -160,19 +179,30 @@ probe_codex() {
   fi
 }
 
-# --- Grok (Grok Build; default model is grok-4.5 as of 2026-07) ---
-probe_grok() {
-  printf 'bt_grok_available=false\nbt_grok_model=grok-4.5\nbt_grok_fast=grok-composer-2.5-fast\n' > "$D/grok.env"
-  command -v grok &>/dev/null || { echo "Grok: not installed" > "$D/grok.log"; return; }
-  local out rc model="grok-4.5"
-  # Prefer currently advertised default from `grok models` if parseable
-  if grok models 2>/dev/null | grep -q 'grok-4.5'; then model="grok-4.5"
-  elif grok models 2>/dev/null | grep -q 'grok-build'; then model="grok-build"
+# --- Grok (Grok Build; advertised default from `grok models`, fallback grok-4.6) ---
+resolve_grok_model() {
+  local listing default cand
+  listing=$(grok models 2>/dev/null) || true
+  default=$(printf '%s\n' "$listing" | sed -n 's/^Default model:[[:space:]]*//p' | head -1 | tr -d '[:space:]')
+  if [ -n "$default" ]; then
+    echo "$default"
+    return
   fi
+  for cand in grok-4.6 grok-4.5 grok-build; do
+    printf '%s\n' "$listing" | grep -q "$cand" && { echo "$cand"; return; }
+  done
+  echo "grok-4.6"
+}
+
+probe_grok() {
+  printf 'bt_grok_available=false\nbt_grok_model=grok-4.6\n' > "$D/grok.env"
+  command -v grok &>/dev/null || { echo "Grok: not installed" > "$D/grok.log"; return; }
+  local out rc model
+  model=$(resolve_grok_model)
   for a in 1 2; do
-    out=$(rt 50 grok -p "Reply with the single word: ok" -m "$model" --output-format json 2>/dev/null | jq -r 'select(.type!="error") | .text // empty' 2>/dev/null); rc=${PIPESTATUS[0]:-0}
+    out=$(rt 50 grok --no-auto-update -p "Reply with the single word: ok" -m "$model" --output-format json 2>/dev/null | jq -r 'select(.type!="error") | .text // empty' 2>/dev/null); rc=${PIPESTATUS[0]:-0}
     if [ -n "$out" ] && [ "$out" != "null" ]; then
-      printf 'bt_grok_available=true\nbt_grok_model=%s\nbt_grok_fast=grok-composer-2.5-fast\n' "$model" > "$D/grok.env"
+      printf 'bt_grok_available=true\nbt_grok_model=%s\n' "$model" > "$D/grok.env"
       break
     fi
     [ "$rc" = "124" ] && break
@@ -233,9 +263,9 @@ for line in sys.stdin:
 }
 
 probe_opencode() {
-  printf 'bt_opencode_available=false\nbt_opencode_model=\n' > "$D/opencode.env"
+  printf 'bt_opencode_available=false\nbt_opencode_model=\nbt_opencode_variant=\n' > "$D/opencode.env"
   command -v opencode &>/dev/null || { echo "OpenCode: not installed" > "$D/opencode.log"; return; }
-  local model out rc src="default"
+  local model out rc src="default" variant=""
   model=$(resolve_opencode_model)
   if [ -n "$model" ]; then
     if ( [ -f "$HOME/.config/opencode/opencode.json" ] && jq -e --arg m "$model" '(.model // "") == $m' "$HOME/.config/opencode/opencode.json" >/dev/null 2>&1 ) \
@@ -259,13 +289,17 @@ probe_opencode() {
 print(mid if (pid and mid.startswith(pid+"/")) else (f"{pid}/{mid}" if pid and mid else mid))' 2>/dev/null)
         src="headless-default"
       fi
-      printf 'bt_opencode_available=true\nbt_opencode_model=%s\n' "$model" > "$D/opencode.env"
+      variant=""
+      case "$model" in
+        *glm-5.3*) variant="max" ;;
+      esac
+      printf 'bt_opencode_available=true\nbt_opencode_model=%s\nbt_opencode_variant=%s\n' "$model" "$variant" > "$D/opencode.env"
       break
     fi
     [ "$rc" = "124" ] && break
   done
   if grep -q true "$D/opencode.env"; then
-    echo "OpenCode: available (model=${model:-unset}; source=$src)" > "$D/opencode.log"
+    echo "OpenCode: available (model=${model:-unset}; source=$src; variant=${variant:-})" > "$D/opencode.log"
   else
     echo "OpenCode: found but no model responded (auth: opencode auth login; set model in ~/.config/opencode/opencode.json)" > "$D/opencode.log"
   fi
@@ -273,20 +307,20 @@ print(mid if (pid and mid.startswith(pid+"/")) else (f"{pid}/{mid}" if pid and m
 
 # --- Claude CLI (for hosts that are NOT Claude Code) ---
 probe_claude() {
-  printf 'bt_claude_cli_available=false\nbt_claude_model=sonnet\n' > "$D/claude.env"
+  printf 'bt_claude_cli_available=false\nbt_claude_model=opus\n' > "$D/claude.env"
   command -v claude &>/dev/null || { echo "Claude CLI: not installed" > "$D/claude.log"; return; }
   # Nested sessions inside Claude Code are blocked; probe still records CLI presence.
   # Liveness: only when not already inside Claude Code.
   if [ -n "${CLAUDECODE:-}" ] || [ -n "${CLAUDE_CODE_ENTRYPOINT:-}" ]; then
-    echo "bt_claude_cli_available=false" > "$D/claude.env"
+    printf 'bt_claude_cli_available=false\nbt_claude_model=opus\n' > "$D/claude.env"
     echo "Claude: host is Claude Code (use Task tool; nested claude -p blocked)" > "$D/claude.log"
     return
   fi
   local out
   out=$(rt 45 claude -p "Reply with the single word: ok" --model haiku --output-format json 2>/dev/null | jq -r '.result // empty' 2>/dev/null)
   if echo "$out" | grep -qi ok; then
-    printf 'bt_claude_cli_available=true\nbt_claude_model=sonnet\n' > "$D/claude.env"
-    echo "Claude CLI: available (haiku probe ok; default consult sonnet)" > "$D/claude.log"
+    printf 'bt_claude_cli_available=true\nbt_claude_model=opus\n' > "$D/claude.env"
+    echo "Claude CLI: available (haiku probe ok; default consult opus)" > "$D/claude.log"
   else
     echo "Claude CLI: installed but not authenticated (claude /login) or nested" > "$D/claude.log"
   fi
@@ -315,14 +349,14 @@ bt_codex_available=${bt_codex_available:-false}
 bt_codex_home=${bt_codex_home:-${TMPDIR:-/tmp}/bt-codex-home}
 bt_codex_model=${bt_codex_model-gpt-5.6-sol}
 bt_grok_available=${bt_grok_available:-false}
-bt_grok_model=${bt_grok_model:-grok-4.5}
-bt_grok_fast=${bt_grok_fast:-grok-composer-2.5-fast}
+bt_grok_model=${bt_grok_model:-grok-4.6}
 bt_opencode_available=${bt_opencode_available:-false}
 bt_opencode_model=${bt_opencode_model:-}
+bt_opencode_variant=${bt_opencode_variant:-}
 bt_claude_cli_available=${bt_claude_cli_available:-false}
-bt_claude_model=${bt_claude_model:-sonnet}
+bt_claude_model=${bt_claude_model:-opus}
 bt_probe_ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-bt_probe_version=1.10.0
+bt_probe_version=1.11.0
 EOF
 
 rm -rf "$D"

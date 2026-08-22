@@ -26,7 +26,7 @@ check_cli() {
 
 check_cli "agy" "install with: curl -fsSL https://antigravity.google/cli/install.sh | bash (Google AI path; no Gemini CLI)"
 check_cli "codex" "install with: npm install -g @openai/codex"
-check_cli "grok" "install with: curl -fsSL https://x.ai/cli/install.sh | bash (Grok Build; auth: grok login; default model grok-4.5)"
+check_cli "grok" "install with: curl -fsSL https://x.ai/cli/install.sh | bash (Grok Build; auth: grok login; default model grok-4.6)"
 check_cli "opencode" "install from https://opencode.ai (uses your configured default model)"
 check_cli "claude" "install with: npm install -g @anthropic-ai/claude-code"
 

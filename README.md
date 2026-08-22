@@ -18,15 +18,15 @@ Delegates a task to peer AI CLIs in parallel. Second opinions on architecture, r
 - 6-step protocol: restatement, assumptions, evidence, fidelity, honesty, GROUNDED / NOT GROUNDED
 - Host actively curates context before delegating (not "whatever is in the chat")
 
-## Members (v1.10)
+## Members (v1.11)
 
 | Slot | CLI | Notes |
 |------|-----|-------|
-| Anthropic | Claude | Task tool inside Claude Code; `claude -p` from other hosts |
-| Google | **agy only** | No Gemini CLI. Account-tier model; optional `--model` |
+| Anthropic | Claude | Task tool inside Claude Code; `claude -p --model opus` from other hosts |
+| Google | **agy only** | No Gemini CLI. Default pin **`gemini-3.7-flash-high`**; `--output-format json` |
 | OpenAI | Codex | **`gpt-5.6-sol`** (GPT-5.6 Sol); isolated `CODEX_HOME` + `--ignore-user-config`; CLI ≥ **0.144.0** |
-| xAI | Grok | Default model `grok-4.5` |
-| Multi | OpenCode | User's configured/default model (probe discovers) |
+| xAI | Grok | Default model `grok-4.6` (from `grok models`) |
+| Multi | OpenCode | User's configured/default model (probe discovers); `--variant max` for GLM-5.3 |
 
 Up to **five** independent voices when everything is installed and authenticated. Availability is decided by `scripts/bt_probe.sh`, not by preference.
 
@@ -37,9 +37,16 @@ Up to **five** independent voices when everything is installed and authenticated
 | `/braintrust` | Orchestrate a task across peer CLIs |
 | `/consult` | Alias for `/braintrust` |
 
-## v1.10.0 Highlights
+## v1.11.0 Highlights
 
-- **Codex primary model: GPT-5.6 Sol** (`gpt-5.6-sol`). Explicit `-m` because consults use `--ignore-user-config` (user config model pin is ignored).
+- Claude consult default **`opus`**. agy pin **`gemini-3.7-flash-high`**. Grok **`grok-4.6`**. OpenCode `--variant max` when the resolved model contains `glm-5.3`.
+- Probe reads Grok's advertised `Default model:` (no longer prefers `grok-4.5` just because it is still listed).
+- agy `--output-format json` (`.status` / `.response`). Grok `--no-auto-update` and `--prompt-file` for large packages. Codex JSONL checks `error` / `turn.failed`.
+- Harness versions dogfooded 2026-08-22: claude 2.1.239, agy 1.1.18, codex 0.149.0, grok 1.0.5, opencode 1.18.19.
+
+## Earlier (v1.10)
+
+- **Codex primary model: GPT-5.6 Sol** (`gpt-5.6-sol`). Explicit `-m` because consults use `--ignore-user-config`.
 - Probe prefers Sol, falls back to product default if Sol is unavailable, and records `bt_codex_model`.
 - Documented minimum **Codex CLI 0.144.0+** for Sol (`npm i -g @openai/codex@latest`).
 
@@ -59,7 +66,7 @@ All peers optional; braintrust uses whatever the probe authenticates.
 - [Grok Build](https://docs.x.ai/build/overview) — `curl -fsSL https://x.ai/cli/install.sh | bash`
 - [OpenCode](https://opencode.ai/docs/cli/) — with an authed provider; set `"model"` in `~/.config/opencode/opencode.json` so headless matches your TUI default
 
-`jq` required for Codex / Grok / OpenCode JSON parsing.
+`jq` required for Codex / Grok / OpenCode / agy JSON parsing.
 
 ## Install
 

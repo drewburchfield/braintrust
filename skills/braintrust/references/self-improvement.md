@@ -76,6 +76,8 @@ Treat local `--help` + dogfood as higher priority than blog posts.
 - [ ] Codex CLI ≥ 0.144.0 when using GPT-5.6 Sol (`codex --version`)
 - [ ] Every `bt_*=true` CLI returns a one-word headless ok
 - [ ] SKILL + references mention no `gemini` binary path
-- [ ] Default Grok model matches `grok models`
-- [ ] OpenCode model matches an authed provider (`opencode auth list`)
+- [ ] Default Grok model matches `Default model:` from `grok models` (`grok-4.6` as of 2026-08)
+- [ ] agy pin is `gemini-3.7-flash-high` when `agy models` lists it
+- [ ] Claude consult default is `opus` (haiku only for liveness)
+- [ ] OpenCode model matches an authed provider (`opencode auth list`); `glm-5.3` ids get `bt_opencode_variant=max`
 - [ ] Version bumped; session note saved under `.braintrust/sessions/`

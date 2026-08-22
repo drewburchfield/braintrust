@@ -75,7 +75,7 @@ Never: global `~/.codex` with memories + MCP for a "neutral peer." That is how o
 |------|-----|
 | File/repo walk | Task in the project (Claude Code) already has tools; **tell it the paths and the verification mandate** |
 | Vision | Attach/read image in Task prompt; other peers get transcription |
-| Headless from other hosts | `claude -p` with enough inline context; avoid `--bare` (auth dies) |
+| Headless from other hosts | `claude -p --model opus` with enough inline context; avoid `--bare` (auth dies) |
 | Nested | Never `claude -p` from inside Claude Code |
 
 Claude is usually your **best file-capable verifier** when the host is Claude Code. Use it that way deliberately; do not waste it on pure prose-only tasks if another peer can adjudicate text.
@@ -84,9 +84,9 @@ Claude is usually your **best file-capable verifier** when the host is Claude Co
 
 | Need | How |
 |------|-----|
-| Headless answer | `--print` + `--dangerously-skip-permissions` |
+| Headless answer | `--print` + `--output-format json` + `--dangerously-skip-permissions`; parse `.response` |
 | Extra roots | `--add-dir` (repeatable) when files live outside cwd |
-| Model pin | `--model "<display name from agy models>"` (account-tier default if omitted) |
+| Model pin | `--model gemini-3.7-flash-high` (probe default). Slugs from `agy models` |
 | No `@path` | **Inline** or ensure cwd/`--add-dir` and tell it relative paths |
 | Artifacts | It may write under its brain dir; host should copy useful drafts back into the repo |
 
@@ -94,7 +94,7 @@ Claude is usually your **best file-capable verifier** when the host is Claude Co
 
 | Need | How |
 |------|-----|
-| Clean headless | `-p` + `--output-format json` + model `grok-4.5` |
+| Clean headless | `--no-auto-update -p` + `--output-format json` + model `grok-4.6` |
 | Avoid repo litter | `--cwd` scratch optional |
 | Tools / MCP | **Prefer off.** History: MCP spawn failures and thrashing on broken `read_file` produced empty consults. |
 | If tools needed | Prefer `--disable-web-search` unless research is the point; put file contents in the prompt; permission mode stay non-write for opinions |
@@ -103,7 +103,7 @@ Claude is usually your **best file-capable verifier** when the host is Claude Co
 
 | Need | How |
 |------|-----|
-| Fast unbiased consult | `run --format json --auto --pure` (+ `-m` only if probe set user's default model) |
+| Fast unbiased consult | `run --format json --auto --pure` (+ `-m` only if probe set user's default model; `--variant` when `bt_opencode_variant` is set) |
 | Attach files | `--file` / `-f` (repeatable) |
 | Repo cwd | `--dir` path |
 | MCP | `--pure` skips external plugins (good default). Drop `--pure` only when a **named** local MCP is required and already healthy. |

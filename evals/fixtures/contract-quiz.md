@@ -23,7 +23,7 @@ Score how well a peer answers from the **skill text only** (variant injected bel
 | Q1 | claude, agy, codex, grok, opencode; Gemini CLI not a member | 1 |
 | Q2 | CODEX_HOME isolated; --ignore-user-config or ephemeral+read-only; stdin closed /dev/null; gpt-5.6-sol (Sol) | 1 |
 | Q3 | opencode run --format json --auto --pure; -m only if bt_opencode_model set | 1 |
-| Q4 | grok -p; grok-4.5; output-format json | 1 |
+| Q4 | grok -p; grok-4.6; output-format json | 1 |
 | Q5 | agy --print; no gemini fallback | 1 |
 | Q6 | Task tool / subagent (not claude -p nested) | 1 |
 | Q7 | identity=profile/memories/MCP; workspace=files/cwd | 1 |

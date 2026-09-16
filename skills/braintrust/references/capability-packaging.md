@@ -59,7 +59,7 @@ Default multi-voice layout that worked repeatedly:
 
 | Need | How |
 |------|-----|
-| Clean identity (default) | `CODEX_HOME=$bt_codex_home` (auth only) + `--ignore-user-config` + no MCP in that home |
+| Clean identity (default) | `CODEX_HOME=$bt_codex_home` (auth only) + `--ignore-user-config --ignore-rules` + no MCP and no `hooks.json` in that home |
 | No repo bleed | `-C "${TMPDIR:-/tmp}"` **and** put evidence in `$QUERY` or a prompt file |
 | **Must** read the live repo | Drop `-C` (cwd = repo) or `codex exec -C /path/to/repo ...` but **keep** isolated `CODEX_HOME` |
 | Diff review of working tree | `CODEX_HOME=... codex review --uncommitted` from the repo (identity still isolated) |
@@ -75,7 +75,8 @@ Never: global `~/.codex` with memories + MCP for a "neutral peer." That is how o
 |------|-----|
 | File/repo walk | Task in the project (Claude Code) already has tools; **tell it the paths and the verification mandate** |
 | Vision | Attach/read image in Task prompt; other peers get transcription |
-| Headless from other hosts | `claude -p --model opus` with enough inline context; avoid `--bare` (auth dies) |
+| Headless from other hosts | `claude -p --model 'claude-opus-4-8[1m]' --settings '{"disableAllHooks":true}'` with enough inline context; avoid `--bare` (auth dies) |
+| Inside Claude Code | Task tool `subagent_type: "braintrust:peer"` (Opus 4.8 1M, no CLAUDE.md, read-only) |
 | Nested | Never `claude -p` from inside Claude Code |
 
 Claude is usually your **best file-capable verifier** when the host is Claude Code. Use it that way deliberately; do not waste it on pure prose-only tasks if another peer can adjudicate text.
@@ -86,7 +87,7 @@ Claude is usually your **best file-capable verifier** when the host is Claude Co
 |------|-----|
 | Headless answer | `--print` + `--output-format json` + `--dangerously-skip-permissions`; parse `.response` |
 | Extra roots | `--add-dir` (repeatable) when files live outside cwd |
-| Model pin | `--model gemini-3.7-flash-high` (probe default). Slugs from `agy models` |
+| Model pin | `--model "$bt_agy_model"` (newest `gemini-*-flash-high`; `gemini-3.8-flash-high` as of 2026-09). Slugs from `agy models` |
 | No `@path` | **Inline** or ensure cwd/`--add-dir` and tell it relative paths |
 | Artifacts | It may write under its brain dir; host should copy useful drafts back into the repo |
 
@@ -94,7 +95,7 @@ Claude is usually your **best file-capable verifier** when the host is Claude Co
 
 | Need | How |
 |------|-----|
-| Clean headless | `--no-auto-update -p` + `--output-format json` + model `grok-4.6` |
+| Clean headless | `GROK_HOME=$bt_grok_home GROK_DISABLE_AUTOUPDATER=1 grok -p` + `--output-format json --disable-web-search --no-subagents` + model `grok-4.6`. The real `~/.grok` carries agent-bus hooks |
 | Avoid repo litter | `--cwd` scratch optional |
 | Tools / MCP | **Prefer off.** History: MCP spawn failures and thrashing on broken `read_file` produced empty consults. |
 | If tools needed | Prefer `--disable-web-search` unless research is the point; put file contents in the prompt; permission mode stay non-write for opinions |
@@ -106,7 +107,7 @@ Claude is usually your **best file-capable verifier** when the host is Claude Co
 | Fast unbiased consult | `run --format json --auto --pure` (+ `-m` only if probe set user's default model; `--variant` when `bt_opencode_variant` is set) |
 | Attach files | `--file` / `-f` (repeatable) |
 | Repo cwd | `--dir` path |
-| MCP | `--pure` skips external plugins (good default). Drop `--pure` only when a **named** local MCP is required and already healthy. |
+| MCP / plugins | `--pure` skips config plugins (hcom, cmux feeds) and is the isolation knob. Drop `--pure` only when a **named** local MCP is required and already healthy. |
 | Permissions | `--auto` for headless tool use; still keep the task read-only in the prompt |
 
 ---

@@ -108,14 +108,14 @@ run_peer() {
       if [[ -n "${bt_codex_model+x}" && -z "${bt_codex_model}" ]]; then
         model_args=()
       else
-        model_args=(-m "${bt_codex_model:-gpt-5.6-sol}")
+        model_args=(-m "${bt_codex_model:-gpt-6-astra}")
       fi
-      CODEX_HOME="$home" timeout 150 codex exec --ephemeral --ignore-user-config \
+      CODEX_HOME="$home" timeout 150 codex exec --ephemeral --ignore-user-config --ignore-rules \
         -s read-only --json --skip-git-repo-check "${model_args[@]}" -C "${TMPDIR:-/tmp}" "$q" \
         </dev/null 2>"$outdir/stderr.txt" >"$outdir/raw.jsonl" || true
       jq -rs '
         (map(select(.type=="error" or .type=="turn.failed")) | last) as $err
-        | if $err then empty
+        | if $err then "CODEX_FAILED: "+(($err.error.message // $err.message // $err.error // $err.type) | tostring)
           else map(select(.item.type? == "agent_message")) | last | .item.text // empty
           end
       ' "$outdir/raw.jsonl" >"$outdir/result.txt" 2>/dev/null || true
@@ -124,8 +124,9 @@ run_peer() {
       if [[ "${bt_grok_available:-true}" == "false" ]]; then
         echo "SKIPPED unavailable" >"$outdir/result.txt"; return
       fi
-      timeout 150 grok --no-auto-update -p "$q" -m "${bt_grok_model:-grok-4.6}" \
-        --output-format json --disable-web-search \
+      GROK_HOME="${bt_grok_home:-/tmp/bt-grok-home}" GROK_DISABLE_AUTOUPDATER=1 \
+        timeout 150 grok -p "$q" -m "${bt_grok_model:-grok-4.6}" \
+        --output-format json --disable-web-search --no-subagents \
         2>"$outdir/stderr.txt" \
         | jq -r 'if .type=="error" then "GROK_FAILED: "+.message else .text end' \
         >"$outdir/result.txt" || true
@@ -149,7 +150,8 @@ run_peer() {
       if [[ "${bt_claude_cli_available:-true}" == "false" ]]; then
         echo "SKIPPED unavailable" >"$outdir/result.txt"; return
       fi
-      timeout 150 claude -p "$q" --model "${bt_claude_model:-opus}" --output-format json \
+      timeout 150 claude -p "$q" --model "${bt_claude_model:-claude-opus-4-8[1m]}" --output-format json \
+        --no-session-persistence --settings '{"disableAllHooks":true}' \
         2>"$outdir/stderr.txt" \
         | jq -r '.result // empty' >"$outdir/result.txt" || true
       ;;
@@ -165,7 +167,7 @@ run_peer() {
 score_ops_edge() {
   local f="$1" t score=0 notes=()
   t=$(cat "$f" 2>/dev/null || true)
-  [[ -z "$t" || "$t" == SKIPPED* ]] && { echo "0|empty"; return; }
+  [[ -z "$t" || "$t" == SKIPPED* || "${t%%$'\n'*}" == *_FAILED:* ]] && { echo "0|empty"; return; }
   echo "$t" | grep -qiE 'CODEX_HOME|ignore-user-config|memories|MCP' && { score=$((score+1)); notes+=("Q1"); } || true
   echo "$t" | grep -qiE 'spending-limit|billing|type.*error|\.type' && { score=$((score+1)); notes+=("Q2"); } || true
   echo "$t" | grep -qiE 'opencode\.json|config' && echo "$t" | grep -qiE 'session|non-free|omit|bt_opencode' && { score=$((score+1)); notes+=("Q3"); } || true
@@ -175,7 +177,8 @@ score_ops_edge() {
   echo "$t" | grep -qiE '/tmp/bt_.*\.err|bt_<cli>\.err|stderr' && { score=$((score+1)); notes+=("Q7"); } || true
   echo "$t" | grep -qiE 'PATH|SessionStart|hook' && echo "$t" | grep -qiE 'probe|auth|liveness|authenticated' && { score=$((score+1)); notes+=("Q8"); } || true
   echo "$t" | grep -qiE 'gtimeout|coreutils|timeout' && { score=$((score+1)); notes+=("Q9"); } || true
-  if echo "$t" | grep -qiE 'NOT GROUNDED'; then :; elif echo "$t" | grep -qiE '\bGROUNDED\b'; then score=$((score+1)); notes+=("Q10"); fi
+  local tail3; tail3=$(echo "$t" | grep -v '^[[:space:]]*$' | tail -3)
+  if echo "$tail3" | grep -qiE 'NOT GROUNDED'; then :; elif echo "$tail3" | grep -qiE '\bGROUNDED\b'; then score=$((score+1)); notes+=("Q10"); fi
   local joined; joined=$(IFS=,; echo "${notes[*]-}")
   echo "${score}|${joined}"
 }
@@ -191,7 +194,7 @@ score_result() {
   local notes=()
   local t
   t=$(cat "$f" 2>/dev/null || true)
-  [[ -z "$t" || "$t" == SKIPPED* ]] && { echo "0|empty"; return; }
+  [[ -z "$t" || "$t" == SKIPPED* || "${t%%$'\n'*}" == *_FAILED:* ]] && { echo "0|empty"; return; }
 
   # Q1: five members present; Gemini may be mentioned only as excluded
   local q1=0
@@ -203,19 +206,21 @@ score_result() {
   score=$((score+q1)); [[ $q1 -eq 1 ]] && notes+=("Q1")
 
   echo "$t" | grep -qiE 'CODEX_HOME' && echo "$t" | grep -qiE 'ignore-user-config|/dev/null|stdin' \
+    && echo "$t" | grep -qiE 'gpt-6-astra|astra' \
     && { score=$((score+1)); notes+=("Q2"); } || true
 
   echo "$t" | grep -qiE 'opencode run' && echo "$t" | grep -qiE -- '--pure|bt_opencode_model|-m' \
     && { score=$((score+1)); notes+=("Q3"); } || true
 
   echo "$t" | grep -qiE 'grok-4\.6' && echo "$t" | grep -qiE -- '-p|headless|output-format json' \
+    && echo "$t" | grep -qiE 'GROK_HOME|bt_grok_home' \
     && { score=$((score+1)); notes+=("Q4"); } || true
 
   echo "$t" | grep -qiE 'agy' && echo "$t" | grep -qiE -- '--print' \
     && echo "$t" | grep -qiE 'never|not|no .*gemini|gemini' \
     && { score=$((score+1)); notes+=("Q5"); } || true
 
-  echo "$t" | grep -qiE 'Task tool|subagent|general-purpose' \
+  echo "$t" | grep -qiE 'Task tool|subagent|general-purpose|braintrust:peer' \
     && { score=$((score+1)); notes+=("Q6"); } || true
 
   echo "$t" | grep -qiE 'identity' && echo "$t" | grep -qiE 'workspace|files|cwd' \
@@ -227,9 +232,10 @@ score_result() {
   echo "$t" | grep -qiE '/tmp/bt_models\.env' \
     && { score=$((score+1)); notes+=("Q9"); } || true
 
-  if echo "$t" | grep -qiE 'NOT GROUNDED'; then
+  local tail3; tail3=$(echo "$t" | grep -v '^[[:space:]]*$' | tail -3)
+  if echo "$tail3" | grep -qiE 'NOT GROUNDED'; then
     :
-  elif echo "$t" | grep -qiE '\bGROUNDED\b'; then
+  elif echo "$tail3" | grep -qiE '\bGROUNDED\b'; then
     score=$((score+1)); notes+=("Q10")
   fi
 

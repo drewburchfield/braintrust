@@ -5,11 +5,11 @@ Consult peer AI CLIs in parallel for second opinions. **No Gemini CLI.**
 ## Members
 | Slot | CLI | Default |
 |------|-----|---------|
-| Anthropic | Claude | Task tool inside Claude Code; else `claude -p --model opus --output-format json` |
-| Google | **agy only** | `gemini-3.7-flash-high`; `agy --print` + `--output-format json` + `--dangerously-skip-permissions` (PTY wrapper if bare hangs) |
-| OpenAI | Codex | **gpt-5.6-sol** (GPT-5.6 Sol); isolated clean profile; CLI ≥ 0.144.0 |
-| xAI | Grok | `grok-4.6` |
-| Multi | OpenCode | User default model from probe; `--variant max` when id contains `glm-5.3` |
+| Anthropic | Claude | `braintrust:peer` agent (Task tool) inside Claude Code; else `claude -p --model 'claude-opus-4-8[1m]' --settings '{"disableAllHooks":true}' --output-format json` |
+| Google | **agy only** | newest `gemini-*-flash-high` from probe (`gemini-3.8-flash-high`); `agy --print` + `--output-format json` + `--dangerously-skip-permissions` (PTY wrapper if bare hangs) |
+| OpenAI | Codex | **gpt-6-astra** (GPT-6 Astra; fallback gpt-5.6-sol); isolated clean profile; CLI 0.154.0 |
+| xAI | Grok | `grok-4.6`; isolated `GROK_HOME` |
+| Multi | OpenCode | User default model from probe (expected `zai-coding-plan/glm-5.3`); `--variant max` when id contains `glm-5.3`; `--pure` |
 
 Skip any CLI the probe marks unavailable. Host never peers with itself.
 
@@ -23,7 +23,9 @@ Cache: `/tmp/bt_models.env`
 
 ## Launch (copy)
 
-**Claude Code host → Claude peer:** Task tool `general-purpose` (never nested `claude -p`). Prefer model opus.
+**Claude Code host → Claude peer:** Task tool `subagent_type: "braintrust:peer"` (pins `claude-opus-4-8[1m]`, read-only, no CLAUDE.md; never nested `claude -p`).
+
+**Identity isolation (every peer):** Codex `CODEX_HOME` + `--ignore-user-config --ignore-rules`; Grok `GROK_HOME` + `--no-subagents`; OpenCode `--pure`; Claude `braintrust:peer` or `--settings '{"disableAllHooks":true}'`. Ambient agent-bus hooks (hcom) in the real homes hijack headless answers otherwise.
 
 **agy:**
 ```bash
@@ -33,19 +35,21 @@ timeout 120 agy --print "$QUERY" --dangerously-skip-permissions --output-format 
 # NEVER fall back to gemini CLI
 ```
 
-**Codex (GPT-5.6 Sol primary; identity isolated; workspace optional):**
+**Codex (GPT-6 Astra primary; identity isolated; workspace optional):**
 ```bash
 CODEX_HOME="${bt_codex_home:-/tmp/bt-codex-home}" \
-  timeout 150 codex exec --ephemeral --ignore-user-config -s read-only --json --skip-git-repo-check \
-  -m "${bt_codex_model:-gpt-5.6-sol}" \
+  timeout 150 codex exec --ephemeral --ignore-user-config --ignore-rules -s read-only --json --skip-git-repo-check \
+  -m "${bt_codex_model:-gpt-6-astra}" \
   -C "${TMPDIR:-/tmp}" "$QUERY" < /dev/null 2>/tmp/bt_codex.err > /tmp/codex.json
-jq -rs 'map(select(.item.type? == "agent_message")) | last | .item.text' /tmp/codex.json
+jq -rs '(map(select(.type=="error" or .type=="turn.failed")) | last) as $e
+  | if $e then "CODEX_FAILED: "+($e.error.message // $e.message) else (map(select(.item.type? == "agent_message")) | last | .item.text) end' /tmp/codex.json
 ```
-Primary model id: **`gpt-5.6-sol`**. Requires Codex CLI ≥ 0.144.0. Always pass `-m` with `--ignore-user-config`. For repo walk: same isolation + Sol pin, set `-C` to the repo. Always close stdin.
+Primary model id: **`gpt-6-astra`**. Verified on Codex CLI 0.154.0. Always pass `-m` with `--ignore-user-config`. A usage-limit error is a plan cap: skip the slot. For repo walk: same isolation + Astra pin, set `-C` to the repo. Always close stdin.
 
 **Grok:**
 ```bash
-timeout 120 grok --no-auto-update -p "$QUERY" -m "${bt_grok_model:-grok-4.6}" --output-format json --disable-web-search 2>/tmp/bt_grok.err \
+GROK_HOME="${bt_grok_home:-/tmp/bt-grok-home}" GROK_DISABLE_AUTOUPDATER=1 \
+  timeout 120 grok -p "$QUERY" -m "${bt_grok_model:-grok-4.6}" --output-format json --disable-web-search --no-subagents 2>/tmp/bt_grok.err \
   | jq -r 'if .type=="error" then "GROK_FAILED: "+.message else .text end'
 ```
 
@@ -60,7 +64,7 @@ timeout 120 opencode "${OC_ARGS[@]}" "$QUERY" 2>/tmp/bt_opencode.err \
 Only pass `-m` when probe set `bt_opencode_model` (from user's OpenCode config or last non-free session). Never hardcode a vendor model id.
 
 ## Capability knobs (do not collapse)
-1. **Identity isolation** — whose memories/AGENTS/MCP load (default: clean, especially Codex via `CODEX_HOME`).
+1. **Identity isolation** — whose memories/AGENTS/MCP/hooks load (default: clean via `CODEX_HOME`, `GROK_HOME`, `--pure`, `braintrust:peer`).
 2. **Workspace access** — which files/cwd the peer may use (default: task-shaped package).
 
 ### Modes (pick one primary per peer)

@@ -11,6 +11,8 @@ Harnesses ship weekly. This plugin drifts unless it re-verifies. Run this cycle 
 
 ### 1. Capture current binary truth (local, no docs)
 
+Shell wrappers (cmux, hcom) may shadow the binaries in interactive zsh. Call them through `bash -c` or by absolute path (`~/.local/bin/<cli>`) when `--version` prints a wrapper error.
+
 ```bash
 for c in claude agy codex grok opencode; do
   echo "==== $c ===="
@@ -23,6 +25,7 @@ codex review --help 2>&1 | head -40
 opencode run --help 2>&1 | head -60
 agy models 2>&1 | head -20
 grok models 2>&1 | head -20
+jq -r '.models[].slug' ~/.codex/models_cache.json 2>/dev/null   # OpenAI model catalog seen by this CLI
 opencode models 2>&1 | head -40
 opencode auth list 2>&1 | head -20
 ```
@@ -42,8 +45,8 @@ Use the contracts in `cli-contracts.md`. Record pass/fail + latency + stderr sni
 
 Update in this order:
 
-1. `scripts/bt_probe.sh` (discovery + defaults)
-2. `references/cli-contracts.md` (flags, models, parse paths)
+1. `scripts/bt_probe.sh` (discovery + defaults + isolated homes)
+2. `references/cli-contracts.md` (flags, models, parse paths) and `agents/peer.md` (Claude peer model pin)
 3. `references/failure-modes.md` (new rows only)
 4. `skills/braintrust/SKILL.md` (orchestration defaults only; keep lean)
 5. `hooks/session-start.sh` (PATH presence list)
@@ -72,12 +75,13 @@ Treat local `--help` + dogfood as higher priority than blog posts.
 
 ## Exit criteria for a refresh
 
-- [ ] Probe writes a complete `/tmp/bt_models.env` (includes `bt_codex_model=gpt-5.6-sol` when Sol works)
-- [ ] Codex CLI ≥ 0.144.0 when using GPT-5.6 Sol (`codex --version`)
-- [ ] Every `bt_*=true` CLI returns a one-word headless ok
+- [ ] Probe writes a complete `/tmp/bt_models.env` (includes `bt_codex_model=gpt-6-astra` when Astra works, `bt_codex_error` when it does not)
+- [ ] Codex CLI ≥ 0.154.0 (`codex --version`); `~/.codex/models_cache.json` still lists `gpt-6-astra`
+- [ ] Every `bt_*=true` CLI returns a one-word headless ok **from its isolated home** (no agent-bus / hcom text in the answer)
 - [ ] SKILL + references mention no `gemini` binary path
-- [ ] Default Grok model matches `Default model:` from `grok models` (`grok-4.6` as of 2026-08)
-- [ ] agy pin is `gemini-3.7-flash-high` when `agy models` lists it
-- [ ] Claude consult default is `opus` (haiku only for liveness)
-- [ ] OpenCode model matches an authed provider (`opencode auth list`); `glm-5.3` ids get `bt_opencode_variant=max`
+- [ ] Default Grok model matches `Default model:` from `grok models` (`grok-4.6` as of 2026-09)
+- [ ] agy pin is the newest `gemini-*-flash-high` in `agy models` (`gemini-3.8-flash-high` as of 2026-09)
+- [ ] Claude consult model is `claude-opus-4-8[1m]` in `agents/peer.md` and the probe (haiku only for liveness); bump only when a model above Opus 5 ships
+- [ ] OpenCode model matches an authed provider (`opencode auth list`) and contains `glm-5.3` (`bt_opencode_variant=max`)
+- [ ] `--pure`, `GROK_HOME`, `CODEX_HOME`, and `disableAllHooks` still neutralize the hooks listed in `failure-modes.md`
 - [ ] Version bumped; session note saved under `.braintrust/sessions/`

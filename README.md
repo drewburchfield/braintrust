@@ -18,19 +18,19 @@ Delegates a task to peer AI CLIs in parallel. Second opinions on architecture, r
 - 6-step protocol: restatement, assumptions, evidence, fidelity, honesty, GROUNDED / NOT GROUNDED
 - Host actively curates context before delegating (not "whatever is in the chat")
 
-## Members (v1.12)
+## Members (v1.13)
 
 | Slot | CLI | Notes |
 |------|-----|-------|
-| Anthropic | Claude | `braintrust:peer` agent (Opus 4.8, 1M) inside Claude Code; `claude -p --model 'claude-opus-4-8[1m]' --settings '{"disableAllHooks":true}'` from other hosts |
+| Anthropic | Claude | `braintrust:peer` agent (Opus 5.5, 1M) inside Claude Code; `claude -p --model 'claude-opus-5-5[1m]' --settings '{"disableAllHooks":true}'` from other hosts |
 | Google | **agy only** | No Gemini CLI. Newest Flash High from `agy models` (**`gemini-3.8-flash-high`** as of 2026-09); `--output-format json` |
 | OpenAI | Codex | **`gpt-6-astra`** (GPT-6 Astra; fallback `gpt-5.6-sol`); isolated `CODEX_HOME` + `--ignore-user-config --ignore-rules`; CLI **0.154.0** verified |
-| xAI | Grok | Default model `grok-4.6` (from `grok models`); isolated `GROK_HOME` |
+| xAI | Cursor CLI, else Grok CLI | Cursor: newest `grok-X.Y-high` (`grok-4.7-high` today), `--mode ask`. Grok CLI: `grok models` default, isolated `GROK_HOME` |
 | Multi | OpenCode | User's configured/default model (expected `zai-coding-plan/glm-5.3`); `--variant max` for GLM-5.3; `--pure` |
 
 Up to **five** independent voices when everything is installed and authenticated. Availability is decided by `scripts/bt_probe.sh`, not by preference.
 
-Every peer runs **identity-isolated**. The probe builds `/tmp/bt-codex-home` and `/tmp/bt-grok-home` (auth only), OpenCode runs `--pure`, and the Claude peer skips CLAUDE.md and user hooks. Ambient agent-bus hooks (hcom) in the real homes otherwise hijack headless answers.
+Every peer runs **identity-isolated**. The probe builds `/tmp/bt-codex-home` and `/tmp/bt-grok-home` (auth only), Cursor runs read-only (`--mode ask`, cmux hooks off, no MCP approval), OpenCode runs `--pure`, and the Claude peer skips CLAUDE.md and user hooks. Ambient agent-bus hooks (hcom) in the real homes otherwise hijack headless answers.
 
 ## Commands
 
@@ -38,7 +38,14 @@ Every peer runs **identity-isolated**. The probe builds `/tmp/bt-codex-home` and
 |---------|--------------|
 | `/braintrust` | Orchestrate a task across peer CLIs |
 | `/consult` | Alias for `/braintrust` |
-| `braintrust:peer` agent | Claude peer voice (Opus 4.8 1M, read-only) used by the Task tool |
+| `braintrust:peer` agent | Claude peer voice (Opus 5.5 1M, read-only) used by the Task tool |
+
+## v1.13.0 Highlights
+
+- **xAI slot via Cursor CLI** (`cursor-agent`) with the newest Grok High model it lists (`grok-4.7-high` today). Grok CLI stays as the fallback; the probe picks one (`bt_xai_via`).
+- Cursor uses your normal login and runs `--mode ask` (read-only, no shell) with cmux hooks off and no MCP approval. Its hcom notice and user rules still reach context; ask mode keeps them from becoming actions.
+- **Claude → Opus 5.5 1M** (`claude-opus-5-5[1m]`) for `braintrust:peer` and `claude -p`.
+- Grok CLI fallback default `grok-4.7`.
 
 ## v1.12.0 Highlights
 

@@ -16,8 +16,8 @@ Hosts inject skill text into context. More text is not free. This harness measur
 cd /path/to/braintrust   # this plugin root
 bash evals/run_eval.sh
 # or
-bash evals/run_eval.sh contract-quiz skill-lean agy,codex,grok,opencode
-bash evals/run_eval.sh contract-quiz skill-full agy,codex,grok,opencode
+bash evals/run_eval.sh contract-quiz skill-lean agy,codex,cursor,grok,opencode
+bash evals/run_eval.sh contract-quiz skill-full agy,codex,cursor,grok,opencode
 ```
 
 Output: `evals/runs/<timestamp>-contract-quiz/` with packages, per-peer results, and `summary.tsv`.
@@ -35,11 +35,11 @@ Output: `evals/runs/<timestamp>-contract-quiz/` with packages, per-peer results,
 
 ```bash
 # lean vs current
-bash evals/run_eval.sh contract-quiz ab agy,codex,grok,opencode
+bash evals/run_eval.sh contract-quiz ab agy,codex,cursor,grok,opencode
 # lean vs hybrid vs current
-bash evals/run_eval.sh ops-edge abc agy,codex,grok,opencode
+bash evals/run_eval.sh ops-edge abc agy,codex,cursor,grok,opencode
 # full matrix: both fixtures x all variants x peers
-bash evals/run_eval.sh matrix all agy,codex,grok,opencode
+bash evals/run_eval.sh matrix all agy,codex,cursor,grok,opencode
 ```
 
 

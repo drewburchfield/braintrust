@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Braintrust model probe - discovers installed + AUTHENTICATED CLIs and best models.
 #
-# Members (no Gemini CLI): Claude (host-dependent), agy, Codex, Grok, OpenCode.
+# Members (no Gemini CLI): Claude (host-dependent), agy, Codex, xAI (Cursor CLI or Grok CLI), OpenCode.
 # Runs checks in PARALLEL. Cache: /tmp/bt_models.env
 #
 # Usage:
@@ -16,10 +16,16 @@
 #    consult once "joined the agent bus" instead of answering). Isolation per CLI:
 #      codex    -> CODEX_HOME=/tmp/bt-codex-home (auth only) + --ignore-user-config + --ignore-rules
 #      grok     -> GROK_HOME=/tmp/bt-grok-home (auth only; hooks/MCP/compat scanning off) + --no-subagents
+#      cursor   -> user's normal login + --mode ask (read-only: no shell, so no hcom join) +
+#                  no --approve-mcps + cmux hooks off (CMUX_CURSOR_HOOKS_DISABLED=1)
 #      opencode -> --pure (skips config plugins, verified to drop hcom.ts)
 #      claude   -> Task tool inside Claude Code; else claude -p --settings '{"disableAllHooks":true}'
 #      agy      -> no hook surface today; plain --print
-#  * Grok default comes from `grok models` ("Default model:"); fallback grok-4.6.
+#  * xAI slot: Cursor CLI (cursor-agent) first, Grok CLI second, one xAI voice per consult.
+#    Cursor pins the newest `grok-X.Y-high` it lists (grok-4.7-high as of 2026-09-22).
+#    Cursor has no flag to skip ~/.cursor/hooks.json or user rules, so the hcom notice
+#    line and rules still reach context; ask mode keeps them from turning into actions.
+#  * Grok CLI default comes from `grok models` ("Default model:"); fallback grok-4.7.
 #  * Codex primary model is gpt-6-astra (GPT-6 Astra). Fallback order: gpt-6-astra ->
 #    gpt-5.6-sol -> product default. Because --ignore-user-config is set, we MUST pass -m.
 #    A usage-limit error is reported verbatim (bt_codex_error) instead of "empty/timeout".
@@ -28,8 +34,7 @@
 #    the probe warns when it does not. If the resolved id contains glm-5.3, bt_opencode_variant=max.
 #  * agy Google pin is the newest `gemini-*-flash-high` slug `agy models` lists
 #    (gemini-3.8-flash-high as of 2026-09-16).
-#  * Claude consult default is claude-opus-4-8[1m] (Opus 4.8, 1M context) until a model
-#    above Opus 5 ships. Liveness probe uses haiku.
+#  * Claude consult default is claude-opus-5-5[1m] (Opus 5.5, 1M context). Liveness probe uses haiku.
 #  * agy 1.1.0+ works bare-piped; PTY wrapper is a durable fallback.
 
 set -u
@@ -60,7 +65,7 @@ cat > "$bt_grok_home/config.toml" << 'TOML'
 [cli]
 auto_update = false
 [models]
-default = "grok-4.6"
+default = "grok-4.7"
 [compat.claude]
 hooks = false
 mcps = false
@@ -239,14 +244,14 @@ resolve_grok_model() {
     echo "$default"
     return
   fi
-  for cand in grok-4.6 grok-4.5 grok-build; do
+  for cand in grok-4.7 grok-4.6 grok-4.5 grok-build; do
     printf '%s\n' "$listing" | grep -q "$cand" && { echo "$cand"; return; }
   done
-  echo "grok-4.6"
+  echo "grok-4.7"
 }
 
 probe_grok() {
-  printf 'bt_grok_available=false\nbt_grok_model=grok-4.6\n' > "$D/grok.env"
+  printf 'bt_grok_available=false\nbt_grok_model=grok-4.7\n' > "$D/grok.env"
   command -v grok &>/dev/null || { echo "Grok: not installed" > "$D/grok.log"; return; }
   local out rc model
   model=$(resolve_grok_model)
@@ -261,6 +266,53 @@ probe_grok() {
   grep -q "bt_grok_available=true" "$D/grok.env" \
     && echo "Grok: available ($model; isolated GROK_HOME, hooks/MCP off)" > "$D/grok.log" \
     || echo "Grok: empty/unauthenticated/billing (parse JSON .message; grok login only if not a billing cap)" > "$D/grok.log"
+}
+
+# --- Cursor CLI (xAI slot primary: newest Grok "high" model Cursor lists) ---
+# Uses the normal Cursor login. Guardrails: --mode ask (read-only), no --approve-mcps,
+# cmux hooks gated off by env, cwd outside any repo.
+cursor_bin() { command -v cursor-agent 2>/dev/null || command -v agent 2>/dev/null; }
+cursor_run() { local t="$1"; shift; (cd "${TMPDIR:-/tmp}" && rt "$t" env -u CMUX_SURFACE_ID CMUX_CURSOR_HOOKS_DISABLED=1 "$@"); }
+resolve_cursor_model() {
+  local listing="$1"
+  printf '%s\n' "$listing" \
+    | grep -oE '^(cursor-)?grok-[0-9]+\.[0-9]+-high( |$)' | tr -d ' ' \
+    | sed -E 's/^(cursor-)?grok-([0-9]+)\.([0-9]+)-high$/\2 \3 &/' \
+    | sort -k1,1n -k2,2n | tail -1 | awk '{print $3}'
+}
+probe_cursor() {
+  printf 'bt_cursor_available=false\nbt_cursor_model=grok-4.7-high\nbt_cursor_error=\n' > "$D/cursor.env"
+  local bin; bin=$(cursor_bin)
+  [ -n "$bin" ] || { echo "Cursor CLI: not installed" > "$D/cursor.log"; return; }
+  local status listing model out ver raw="$D/cursor.json"
+  ver=$("$bin" --version 2>/dev/null | head -1)
+  status=$(cursor_run 30 "$bin" status 2>&1)
+  if ! printf '%s' "$status" | grep -qi 'logged in as'; then
+    printf 'bt_cursor_available=false\nbt_cursor_model=grok-4.7-high\nbt_cursor_error="not logged in"\n' > "$D/cursor.env"
+    echo "Cursor CLI: installed ($ver) but not logged in (cursor-agent login)" > "$D/cursor.log"
+    return
+  fi
+  listing=$(cursor_run 30 "$bin" --list-models 2>/dev/null) || true
+  model=$(resolve_cursor_model "$listing")
+  [ -n "$model" ] || model="grok-4.7-high"
+  for a in 1 2; do
+    cursor_run 90 "$bin" -p "Reply with the single word: ok" \
+      --model "$model" --output-format json --mode ask --trust --workspace "${TMPDIR:-/tmp}" \
+      < /dev/null > "$raw" 2>/dev/null
+    out=$(jq -r 'select(.is_error != true) | .result // empty' "$raw" 2>/dev/null)
+    if echo "$out" | grep -qi ok; then
+      printf 'bt_cursor_available=true\nbt_cursor_model=%s\nbt_cursor_error=\n' "$model" > "$D/cursor.env"
+      break
+    fi
+  done
+  if grep -q 'bt_cursor_available=true' "$D/cursor.env"; then
+    echo "Cursor CLI: available ($ver; model=$model; --mode ask, cmux hooks off)" > "$D/cursor.log"
+  else
+    local err
+    err=$(jq -r 'select(.is_error == true) | .result // .error // empty' "$raw" 2>/dev/null | tr -d '\n"'"'"'`$\\' | cut -c1-160)
+    printf 'bt_cursor_available=false\nbt_cursor_model=%s\nbt_cursor_error="%s"\n' "$model" "$err" > "$D/cursor.env"
+    echo "Cursor CLI: no answer from $model ($ver)${err:+ — $err}" > "$D/cursor.log"
+  fi
 }
 
 # --- OpenCode (user's configured/default model; never hardcode a vendor id) ---
@@ -360,7 +412,7 @@ print(mid if (pid and mid.startswith(pid+"/")) else (f"{pid}/{mid}" if pid and m
 
 # --- Claude CLI (for hosts that are NOT Claude Code) ---
 probe_claude() {
-  local cmodel="claude-opus-4-8[1m]"
+  local cmodel="claude-opus-5-5[1m]"
   printf 'bt_claude_cli_available=false\nbt_claude_model=%s\n' "$cmodel" > "$D/claude.env"
   command -v claude &>/dev/null || { echo "Claude CLI: not installed" > "$D/claude.log"; return; }
   # Nested sessions inside Claude Code are blocked; probe still records CLI presence.
@@ -380,20 +432,27 @@ probe_claude() {
   fi
 }
 
-probe_agy & probe_codex & probe_grok & probe_opencode & probe_claude &
+probe_agy & probe_codex & probe_cursor & probe_grok & probe_opencode & probe_claude &
 wait
 
-cat "$D"/agy.log "$D"/codex.log "$D"/grok.log "$D"/opencode.log "$D"/claude.log 2>/dev/null
+cat "$D"/agy.log "$D"/codex.log "$D"/cursor.log "$D"/grok.log "$D"/opencode.log "$D"/claude.log 2>/dev/null
 echo "Claude host path: Task tool (braintrust:peer agent) when inside Claude Code; claude -p --settings disableAllHooks otherwise"
 
 set -a
 # shellcheck disable=SC1090
 . "$D/agy.env"
 . "$D/codex.env"
+. "$D/cursor.env"
 . "$D/grok.env"
 . "$D/opencode.env"
 . "$D/claude.env"
 set +a
+
+# xAI slot: Cursor first, Grok CLI second; one xAI voice per consult.
+if [ "${bt_cursor_available:-false}" = "true" ]; then bt_xai_via=cursor
+elif [ "${bt_grok_available:-false}" = "true" ]; then bt_xai_via=grok
+else bt_xai_via=; fi
+echo "xAI slot: ${bt_xai_via:-unavailable}"
 
 cat > /tmp/bt_models.env << EOF
 bt_agy_available=${bt_agy_available:-false}
@@ -403,16 +462,20 @@ bt_codex_available=${bt_codex_available:-false}
 bt_codex_home=${bt_codex_home:-${TMPDIR:-/tmp}/bt-codex-home}
 bt_codex_model=${bt_codex_model-gpt-6-astra}
 bt_codex_error="${bt_codex_error:-}"
+bt_cursor_available=${bt_cursor_available:-false}
+bt_cursor_model=${bt_cursor_model:-grok-4.7-high}
+bt_cursor_error="${bt_cursor_error:-}"
 bt_grok_available=${bt_grok_available:-false}
 bt_grok_home=${bt_grok_home:-${TMPDIR:-/tmp}/bt-grok-home}
-bt_grok_model=${bt_grok_model:-grok-4.6}
+bt_grok_model=${bt_grok_model:-grok-4.7}
+bt_xai_via=${bt_xai_via:-}
 bt_opencode_available=${bt_opencode_available:-false}
 bt_opencode_model=${bt_opencode_model:-}
 bt_opencode_variant=${bt_opencode_variant:-}
 bt_claude_cli_available=${bt_claude_cli_available:-false}
-bt_claude_model="${bt_claude_model:-claude-opus-4-8[1m]}"
+bt_claude_model="${bt_claude_model:-claude-opus-5-5[1m]}"
 bt_probe_ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-bt_probe_version=1.12.0
+bt_probe_version=1.13.0
 EOF
 
 rm -rf "$D"

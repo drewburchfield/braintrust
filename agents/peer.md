@@ -1,7 +1,7 @@
 ---
 name: peer
-description: Braintrust Claude peer voice (Opus 4.8, 1M context). Use for the Anthropic slot of a braintrust consult inside Claude Code. Read-only, identity-isolated (no CLAUDE.md), follows the Skeptical Colleague protocol.
-model: claude-opus-4-8[1m]
+description: Braintrust Claude peer voice (Opus 5.5, 1M context). Use for the Anthropic slot of a braintrust consult inside Claude Code. Read-only, identity-isolated (no CLAUDE.md), follows the Skeptical Colleague protocol.
+model: claude-opus-5-5[1m]
 effort: high
 omitClaudeMd: true
 disallowedTools: Write, Edit, NotebookEdit

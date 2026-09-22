@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.13.0 — 2026-09-22
+
+Cursor CLI joins as the xAI path, and Claude moves to Opus 5.5. Dogfooded against claude 2.1.280, agy (gemini-3.8-flash-high), codex 0.155.1, cursor-agent 2026.09.18, opencode (glm-5.3).
+
+- xAI slot: Cursor CLI (`cursor-agent`) first, Grok CLI second. The probe sets `bt_xai_via` so a consult runs one xAI voice. Cursor pins the newest `grok-X.Y-high` from `--list-models` (`grok-4.7-high` today) and runs `--mode ask` (read-only).
+- Cursor uses the normal login. Guardrails: `--mode ask` (read-only, no shell, so it cannot join the hcom bus), no `--approve-mcps`, cmux hooks off via `CMUX_CURSOR_HOOKS_DISABLED=1`, run from `$TMPDIR`. Cursor has no switch for `~/.cursor/hooks.json` or user rules, so the hcom notice line and rules still reach context.
+- Claude consult model is `claude-opus-5-5[1m]` for `braintrust:peer` and `claude -p`.
+- Grok CLI fallback default is `grok-4.7`.
+- Evals: `cursor` peer in the runner; contract-quiz Q4 asks for the Cursor contract. 2026-09-22 contract-quiz on skill-current: agy, codex, cursor (grok-4.7-high), opencode, claude (Opus 5.5) all 10/10.
+
 ## 1.12.0 — 2026-09-16
 
 Harness + model refresh with mandatory identity isolation. Dogfooded against claude 2.1.273, agy 1.2.3, codex 0.154.0, grok 1.0.30, opencode 1.18.31.

@@ -120,12 +120,23 @@ run_peer() {
           end
       ' "$outdir/raw.jsonl" >"$outdir/result.txt" 2>/dev/null || true
       ;;
+    cursor)
+      if [[ "${bt_cursor_available:-true}" == "false" ]]; then
+        echo "SKIPPED unavailable" >"$outdir/result.txt"; return
+      fi
+      ( cd "${TMPDIR:-/tmp}" && env -u CMUX_SURFACE_ID CMUX_CURSOR_HOOKS_DISABLED=1 \
+        timeout 150 cursor-agent -p "$q" --model "${bt_cursor_model:-grok-4.7-high}" \
+        --output-format json --mode ask --trust --workspace "${TMPDIR:-/tmp}" </dev/null ) \
+        2>"$outdir/stderr.txt" \
+        | jq -r 'if .is_error then "CURSOR_FAILED: "+(.result // .error // "error" | tostring) else .result end' \
+        >"$outdir/result.txt" || true
+      ;;
     grok)
       if [[ "${bt_grok_available:-true}" == "false" ]]; then
         echo "SKIPPED unavailable" >"$outdir/result.txt"; return
       fi
       GROK_HOME="${bt_grok_home:-/tmp/bt-grok-home}" GROK_DISABLE_AUTOUPDATER=1 \
-        timeout 150 grok -p "$q" -m "${bt_grok_model:-grok-4.6}" \
+        timeout 150 grok -p "$q" -m "${bt_grok_model:-grok-4.7}" \
         --output-format json --disable-web-search --no-subagents \
         2>"$outdir/stderr.txt" \
         | jq -r 'if .type=="error" then "GROK_FAILED: "+.message else .text end' \
@@ -150,7 +161,7 @@ run_peer() {
       if [[ "${bt_claude_cli_available:-true}" == "false" ]]; then
         echo "SKIPPED unavailable" >"$outdir/result.txt"; return
       fi
-      timeout 150 claude -p "$q" --model "${bt_claude_model:-claude-opus-4-8[1m]}" --output-format json \
+      timeout 150 claude -p "$q" --model "${bt_claude_model:-claude-opus-5-5[1m]}" --output-format json \
         --no-session-persistence --settings '{"disableAllHooks":true}' \
         2>"$outdir/stderr.txt" \
         | jq -r '.result // empty' >"$outdir/result.txt" || true
@@ -212,8 +223,9 @@ score_result() {
   echo "$t" | grep -qiE 'opencode run' && echo "$t" | grep -qiE -- '--pure|bt_opencode_model|-m' \
     && { score=$((score+1)); notes+=("Q3"); } || true
 
-  echo "$t" | grep -qiE 'grok-4\.6' && echo "$t" | grep -qiE -- '-p|headless|output-format json' \
-    && echo "$t" | grep -qiE 'GROK_HOME|bt_grok_home' \
+  echo "$t" | grep -qiE 'cursor' && echo "$t" | grep -qiE 'grok-4\.7' \
+    && echo "$t" | grep -qiE -- '-p|headless|output-format json' \
+    && echo "$t" | grep -qiE 'mode ask|--mode' \
     && { score=$((score+1)); notes+=("Q4"); } || true
 
   echo "$t" | grep -qiE 'agy' && echo "$t" | grep -qiE -- '--print' \
@@ -258,7 +270,7 @@ resolve_variants() {
 resolve_peers() {
   local p="$1"
   if [[ "$p" == "all" ]]; then
-    echo "agy codex grok opencode claude"
+    echo "agy codex cursor grok opencode claude"
   else
     echo "${p//,/ }"
   fi

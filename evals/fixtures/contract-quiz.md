@@ -8,7 +8,7 @@ Score how well a peer answers from the **skill text only** (variant injected bel
 1. List the braintrust member CLIs. Is Gemini CLI a member?
 2. How do you call Codex for a clean-slate second opinion? Name the isolation env var, two required flags/practices, and the primary model id (GPT-6 Astra).
 3. How do you call OpenCode? When do you pass `-m`?
-4. How do you call Grok headless? What default model id is documented, and which env var isolates it from the user's real home?
+4. How do you call the xAI slot through Cursor CLI headless? What default model id is documented, and which mode keeps it read-only?
 5. How do you call agy headless? What must you never fall back to if agy fails?
 6. When running inside Claude Code, how do you get a Claude peer voice?
 7. What are the two separate knobs: identity isolation vs workspace access? One sentence each.
@@ -23,7 +23,7 @@ Score how well a peer answers from the **skill text only** (variant injected bel
 | Q1 | claude, agy, codex, grok, opencode; Gemini CLI not a member | 1 |
 | Q2 | CODEX_HOME isolated; --ignore-user-config or ephemeral+read-only; stdin closed /dev/null; gpt-6-astra (Astra) | 1 |
 | Q3 | opencode run --format json --auto --pure; -m only if bt_opencode_model set | 1 |
-| Q4 | grok -p; grok-4.6; output-format json; GROK_HOME isolated | 1 |
+| Q4 | cursor-agent -p; grok-4.7-high; output-format json; --mode ask | 1 |
 | Q5 | agy --print; no gemini fallback | 1 |
 | Q6 | Task tool / braintrust:peer subagent (not claude -p nested) | 1 |
 | Q7 | identity=profile/memories/MCP; workspace=files/cwd | 1 |

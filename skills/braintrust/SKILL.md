@@ -1,7 +1,7 @@
 ---
 name: braintrust
-description: Orchestrate other AI CLIs (Antigravity/agy, Codex, Grok, OpenCode, Claude Code) for second opinions, research, codebase analysis, design review, security audits, and parallel research. No Gemini CLI.
-version: 1.12.0
+description: Orchestrate other AI CLIs (Antigravity/agy, Codex, Cursor CLI or Grok for xAI, OpenCode, Claude Code) for second opinions, research, codebase analysis, design review, security audits, and parallel research. No Gemini CLI.
+version: 1.13.0
 ---
 
 # Braintrust
@@ -16,10 +16,10 @@ Consult peer AI CLIs in parallel for second opinions. **No Gemini CLI.**
 
 | Slot | CLI | Default |
 |------|-----|---------|
-| Anthropic | Claude | `braintrust:peer` agent (Task tool) inside Claude Code; else `claude -p --model 'claude-opus-4-8[1m]' --settings '{"disableAllHooks":true}' --output-format json` |
+| Anthropic | Claude | `braintrust:peer` agent (Task tool) inside Claude Code; else `claude -p --model 'claude-opus-5-5[1m]' --settings '{"disableAllHooks":true}' --output-format json` |
 | Google | **agy only** | newest `gemini-*-flash-high` from probe (`gemini-3.8-flash-high` as of 2026-09); `--print` + `--output-format json` + `--dangerously-skip-permissions` (PTY if bare hangs) |
 | OpenAI | Codex | **`gpt-6-astra`** (GPT-6 Astra); fallback `gpt-5.6-sol`; isolated `CODEX_HOME`; Codex CLI ≥ 0.154.0 verified |
-| xAI | Grok | `grok-4.6` (probe reads `grok models` Default model); isolated `GROK_HOME` |
+| xAI | Cursor CLI, else Grok CLI | Probe sets `bt_xai_via`. Cursor: newest `grok-X.Y-high` it lists (`grok-4.7-high` as of 2026-09-22); `--mode ask`. Grok CLI: `grok models` Default model (fallback `grok-4.7`); isolated `GROK_HOME` |
 | Multi | OpenCode | User default model from probe (expected `zai-coding-plan/glm-5.3`); `--variant max` when that id contains `glm-5.3`; `--pure` |
 
 Skip any CLI the probe marks unavailable. Host never peers with itself. Full consult is up to five independent voices.
@@ -28,8 +28,8 @@ Skip any CLI the probe marks unavailable. Host never peers with itself. Full con
 
 | You are in | Claude peer | Other peers |
 |------------|-------------|-------------|
-| Claude Code | Task tool with `subagent_type: "braintrust:peer"` (never nested `claude -p`) | bash: agy, codex, grok, opencode |
-| Codex / Grok / OpenCode / agy | `claude -p --model 'claude-opus-4-8[1m]' --settings '{"disableAllHooks":true}' --output-format json` | shell for the rest |
+| Claude Code | Task tool with `subagent_type: "braintrust:peer"` (never nested `claude -p`) | bash: agy, codex, cursor-agent or grok, opencode |
+| Codex / Cursor / Grok / OpenCode / agy | `claude -p --model 'claude-opus-5-5[1m]' --settings '{"disableAllHooks":true}' --output-format json` | shell for the rest |
 
 ## Identity isolation is mandatory
 
@@ -38,12 +38,13 @@ Every peer runs from a clean profile. Ambient hooks (agent buses like hcom), MCP
 | CLI | Isolation |
 |-----|-----------|
 | Codex | `CODEX_HOME=$bt_codex_home` (auth only) + `--ignore-user-config --ignore-rules` |
+| Cursor | Normal login. `--mode ask` (read-only, no shell, so no hcom join) + no `--approve-mcps` + `env -u CMUX_SURFACE_ID CMUX_CURSOR_HOOKS_DISABLED=1`, run from `$TMPDIR`. Cursor has no switch for `~/.cursor/hooks.json` or user rules, so the hcom notice and rules still reach context |
 | Grok | `GROK_HOME=$bt_grok_home` (auth only; compat scanning off) + `GROK_DISABLE_AUTOUPDATER=1` + `--no-subagents` |
 | OpenCode | `--pure` (drops config plugins) |
 | Claude | `braintrust:peer` agent (`omitClaudeMd`, read-only); other hosts add `--settings '{"disableAllHooks":true}'` |
 | agy | no hook surface today; plain `--print` |
 
-The probe creates both isolated homes. `-C` / `--cwd` alone is **not** isolation.
+The probe creates the Codex and Grok homes. `-C` / `--cwd` / `--workspace` alone is **not** isolation.
 
 ## Probe once per session
 
@@ -66,7 +67,7 @@ source /tmp/bt_models.env 2>/dev/null || true
 
 Cache: `/tmp/bt_models.env` (stale after ~4h: re-run probe).
 
-**SessionStart hook vs probe:** hook only checks binaries on **PATH**. Probe checks **auth/liveness**, builds the isolated homes, and writes model knobs (`bt_*_available`, `bt_*_model`, `bt_codex_home`, `bt_grok_home`, `bt_codex_error`, `bt_opencode_variant`).
+**SessionStart hook vs probe:** hook only checks binaries on **PATH**. Probe checks **auth/liveness**, builds the isolated homes, and writes model knobs (`bt_*_available`, `bt_*_model`, `bt_codex_home`, `bt_grok_home`, `bt_xai_via`, `bt_codex_error`, `bt_cursor_error`, `bt_opencode_variant`).
 
 ## Grounding first
 
@@ -84,17 +85,17 @@ The probe already detects `timeout`/`gtimeout`.
 
 ### Claude
 
-**Claude Code host:** Task tool, `subagent_type: "braintrust:peer"`, background. The agent pins `claude-opus-4-8[1m]`, skips CLAUDE.md, and is read-only. If the plugin agent is unavailable, use `general-purpose` and say so in the coverage notes.
+**Claude Code host:** Task tool, `subagent_type: "braintrust:peer"`, background. The agent pins `claude-opus-5-5[1m]`, skips CLAUDE.md, and is read-only. If the plugin agent is unavailable, use `general-purpose` and say so in the coverage notes.
 
 **Other hosts:**
 
 ```bash
-claude -p "$QUERY" --model "${bt_claude_model:-claude-opus-4-8[1m]}" --output-format json \
+claude -p "$QUERY" --model "${bt_claude_model:-claude-opus-5-5[1m]}" --output-format json \
   --no-session-persistence --settings '{"disableAllHooks":true}' 2>/tmp/bt_claude.err \
   | jq -r '.result // empty'
 ```
 
-Do not use `--bare` for consults (skips keychain/OAuth). Stdin is capped at 10MB; large packages go in a file path in the prompt. Model stays Opus 4.8 1M until a model above Opus 5 ships.
+Do not use `--bare` for consults (skips keychain/OAuth). Stdin is capped at 10MB; large packages go in a file path in the prompt.
 
 ### agy (Google, only path)
 
@@ -142,12 +143,28 @@ jq -rs '
 For repo walk: same isolation + Astra pin, set `-C` to the repo. Always close stdin.  
 **`-C` alone is not isolation.** Off-topic answers usually mean missing clean `CODEX_HOME` and/or `--ignore-user-config` (memories/MCP/hooks/user config still loaded).
 
-### Grok
+### xAI slot
+
+One xAI voice per consult. Use the CLI named in `bt_xai_via` (`cursor` or `grok`); skip the slot when it is empty.
+
+#### Cursor CLI (`bt_xai_via=cursor`)
 
 ```bash
-source /tmp/bt_models.env 2>/dev/null || bt_grok_model=grok-4.6
+source /tmp/bt_models.env 2>/dev/null
+( cd "${TMPDIR:-/tmp}" && env -u CMUX_SURFACE_ID CMUX_CURSOR_HOOKS_DISABLED=1 \
+  timeout 150 cursor-agent -p "$QUERY" --model "${bt_cursor_model:-grok-4.7-high}" \
+  --output-format json --mode ask --trust --workspace "${TMPDIR:-/tmp}" < /dev/null ) 2>/tmp/bt_cursor.err \
+  | jq -r 'if .is_error then "CURSOR_FAILED: "+(.result // .error // "error" | tostring) else .result end'
+```
+
+`--mode ask` is read-only Q&A and is what keeps ambient hooks and rules from turning into actions. Never add `--force`, `--yolo`, or `--approve-mcps`. For repo walk (Mode C), point `--workspace` at the repo. Always close stdin.
+
+#### Grok CLI (`bt_xai_via=grok`)
+
+```bash
+source /tmp/bt_models.env 2>/dev/null || bt_grok_model=grok-4.7
 GROK_HOME="${bt_grok_home:-/tmp/bt-grok-home}" GROK_DISABLE_AUTOUPDATER=1 \
-  timeout 120 grok -p "$QUERY" -m "${bt_grok_model:-grok-4.6}" \
+  timeout 120 grok -p "$QUERY" -m "${bt_grok_model:-grok-4.7}" \
   --output-format json --disable-web-search --no-subagents 2>/tmp/bt_grok.err \
   | jq -r 'if .type=="error" then "GROK_FAILED: "+.message else .text end'
 ```
@@ -178,7 +195,7 @@ Only pass `-m` when probe set `bt_opencode_model`. Probe model order: (1) `"mode
 
 ## Capability knobs (do not collapse)
 
-1. **Identity isolation** — whose memories/AGENTS/MCP/hooks load (default: clean, via `CODEX_HOME`, `GROK_HOME`, `--pure`, `braintrust:peer`).  
+1. **Identity isolation** — whose memories/AGENTS/MCP/hooks load (default: clean, via `CODEX_HOME`, Cursor `--mode ask`, `GROK_HOME`, `--pure`, `braintrust:peer`).  
 2. **Workspace access** — which files/cwd the peer may use (default: task-shaped package).
 
 ### Modes (pick one primary per peer)
@@ -206,4 +223,4 @@ Launch all available peers in one parallel batch. Present findings as they arriv
 - Capture stderr to `/tmp/bt_<cli>.err` (not `/dev/null` by default) so timeouts and billing-looking noise stay diagnosable  
 - One retry then skip; never block the whole consult on one failure  
 - Prefer compact packages (Goal Card + curated evidence). Huge inlines time out some peers  
-- Re-verify contracts after harness upgrades: `bash evals/run_eval.sh matrix all agy,codex,grok,opencode`
+- Re-verify contracts after harness upgrades: `bash evals/run_eval.sh matrix all agy,codex,cursor,grok,opencode`

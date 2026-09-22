@@ -4,7 +4,7 @@ Manifest for eval injection of the **shipping always-on skill body**.
 
 **Injection package:**
 
-1. `skills/braintrust/SKILL.md` only (as of v1.12.0: Opus 4.8 1M via `braintrust:peer`, newest Gemini Flash High, Grok 4.6 isolated, GPT-6 Astra)
+1. `skills/braintrust/SKILL.md` only (as of v1.13.0: Opus 5.5 1M via `braintrust:peer`, newest Gemini Flash High, xAI via isolated Cursor CLI (Grok 4.7), GPT-6 Astra)
 
 This is what most hosts inject when the skill loads (references are optional/on-demand).
 

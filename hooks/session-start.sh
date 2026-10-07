@@ -25,9 +25,9 @@ check_cli() {
 }
 
 check_cli "agy" "install with: curl -fsSL https://antigravity.google/cli/install.sh | bash (Google AI path; no Gemini CLI)"
-check_cli "codex" "install with: npm install -g @openai/codex (GPT-6 Astra needs 0.154.0+)"
+check_cli "codex" "install with: npm install -g @openai/codex (GPT-6 Astra; 0.160.0 verified)"
 check_cli "cursor-agent" "install with: curl https://cursor.com/install -fsS | bash (xAI slot via Grok models; auth: cursor-agent login)"
-check_cli "grok" "install with: curl -fsSL https://x.ai/cli/install.sh | bash (Grok Build; xAI fallback; auth: grok login)"
+check_cli "grok" "install with: curl -fsSL https://x.ai/cli/install.sh | bash (Grok Build; optional xAI fallback; auth: grok login)"
 check_cli "opencode" "install from https://opencode.ai (uses your configured default model)"
 check_cli "claude" "install with: npm install -g @anthropic-ai/claude-code"
 

@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.14.0 — 2026-10-07
+
+Harness refresh and doc catch-up. Dogfooded against claude 2.1.292, agy 1.3.1 (gemini-3.8-flash-high), codex 0.160.0 (gpt-6-astra), cursor-agent 2026.10.01 (grok-4.7-high), opencode 1.18.34 (glm-5.3). Every documented flag re-checked against `--help`.
+
+- Codex fallback is `gpt-6.1-sol` (new catalog priority 1, "latest workhorse"). `gpt-6-astra` stays primary as the frontier model. Verified CLI is 0.160.0.
+- agy now loads hcom and herdr hooks from `~/.gemini/config/hooks.json` (installed 2026-09-23) and has no switch to skip them. Docs drop the "no hook surface" claim. A headless run on 2026-10-07 answered cleanly and registered no hcom agent. New failure-mode row: skip the Google slot if bus chatter appears.
+- Cursor: `cli-contracts.md` gains the full contract (it had none). Noted the new `--sandbox`, `--plugin-dir`, `--auto-review` flags and that `~/.cursor/plugins` may load; never pass `--plugin-dir`.
+- Grok CLI is optional and marked unverified since 1.0.30 (not in active use; logged out on 1.0.46). Every reference now agrees on the `grok-4.7` fallback.
+- References catch up with 1.13.0: Opus 5.5 in `cli-contracts.md`, `capability-packaging.md`, `failure-modes.md`, `self-improvement.md`.
+- Doc fallbacks for isolated homes use `${TMPDIR:-/tmp}` to match the probe (macOS `$TMPDIR` is not `/tmp`).
+- Manifests, README, SessionStart hook description, and eval rubric list Cursor. Self-improvement checklist adds hook-surface and stale-string checks.
+
 ## 1.13.0 — 2026-09-22
 
 Cursor CLI joins as the xAI path, and Claude moves to Opus 5.5. Dogfooded against claude 2.1.280, agy (gemini-3.8-flash-high), codex 0.155.1, cursor-agent 2026.09.18, opencode (glm-5.3).

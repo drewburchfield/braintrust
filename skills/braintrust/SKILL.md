@@ -1,7 +1,7 @@
 ---
 name: braintrust
 description: Orchestrate other AI CLIs (Antigravity/agy, Codex, Cursor CLI or Grok for xAI, OpenCode, Claude Code) for second opinions, research, codebase analysis, design review, security audits, and parallel research. No Gemini CLI.
-version: 1.13.0
+version: 1.14.0
 ---
 
 # Braintrust
@@ -17,9 +17,9 @@ Consult peer AI CLIs in parallel for second opinions. **No Gemini CLI.**
 | Slot | CLI | Default |
 |------|-----|---------|
 | Anthropic | Claude | `braintrust:peer` agent (Task tool) inside Claude Code; else `claude -p --model 'claude-opus-5-5[1m]' --settings '{"disableAllHooks":true}' --output-format json` |
-| Google | **agy only** | newest `gemini-*-flash-high` from probe (`gemini-3.8-flash-high` as of 2026-09); `--print` + `--output-format json` + `--dangerously-skip-permissions` (PTY if bare hangs) |
-| OpenAI | Codex | **`gpt-6-astra`** (GPT-6 Astra); fallback `gpt-5.6-sol`; isolated `CODEX_HOME`; Codex CLI ≥ 0.154.0 verified |
-| xAI | Cursor CLI, else Grok CLI | Probe sets `bt_xai_via`. Cursor: newest `grok-X.Y-high` it lists (`grok-4.7-high` as of 2026-09-22); `--mode ask`. Grok CLI: `grok models` Default model (fallback `grok-4.7`); isolated `GROK_HOME` |
+| Google | **agy only** | newest `gemini-*-flash-high` from probe (`gemini-3.8-flash-high` as of 2026-10-07); `--print` + `--output-format json` + `--dangerously-skip-permissions` (PTY if bare hangs) |
+| OpenAI | Codex | **`gpt-6-astra`** (GPT-6 Astra, frontier); fallback `gpt-6.1-sol`; isolated `CODEX_HOME`; Codex CLI 0.160.0 verified |
+| xAI | Cursor CLI, else Grok CLI | Probe sets `bt_xai_via`. Cursor: newest `grok-X.Y-high` it lists (`grok-4.7-high` as of 2026-10-07); `--mode ask`. Grok CLI (fallback, unverified since 1.0.30): `grok models` Default model (fallback `grok-4.7`); isolated `GROK_HOME` |
 | Multi | OpenCode | User default model from probe (expected `zai-coding-plan/glm-5.3`); `--variant max` when that id contains `glm-5.3`; `--pure` |
 
 Skip any CLI the probe marks unavailable. Host never peers with itself. Full consult is up to five independent voices.
@@ -38,11 +38,11 @@ Every peer runs from a clean profile. Ambient hooks (agent buses like hcom), MCP
 | CLI | Isolation |
 |-----|-----------|
 | Codex | `CODEX_HOME=$bt_codex_home` (auth only) + `--ignore-user-config --ignore-rules` |
-| Cursor | Normal login. `--mode ask` (read-only, no shell, so no hcom join) + no `--approve-mcps` + `env -u CMUX_SURFACE_ID CMUX_CURSOR_HOOKS_DISABLED=1`, run from `$TMPDIR`. Cursor has no switch for `~/.cursor/hooks.json` or user rules, so the hcom notice and rules still reach context |
+| Cursor | Normal login. `--mode ask` (read-only, no shell, so no hcom join) + no `--approve-mcps` + `env -u CMUX_SURFACE_ID CMUX_CURSOR_HOOKS_DISABLED=1`, run from `$TMPDIR`. Cursor has no switch for `~/.cursor/hooks.json`, user rules, or `~/.cursor/plugins`, so the hcom notice and rules still reach context. Never pass `--plugin-dir` |
 | Grok | `GROK_HOME=$bt_grok_home` (auth only; compat scanning off) + `GROK_DISABLE_AUTOUPDATER=1` + `--no-subagents` |
 | OpenCode | `--pure` (drops config plugins) |
 | Claude | `braintrust:peer` agent (`omitClaudeMd`, read-only); other hosts add `--settings '{"disableAllHooks":true}'` |
-| agy | no hook surface today; plain `--print` |
+| agy | Plain `--print`. hcom and herdr hooks live in `~/.gemini/config/hooks.json` and agy has no switch to skip them. Verified 2026-10-07: headless answers stay clean. If an answer mentions hcom or an agent bus, skip the Google slot |
 
 The probe creates the Codex and Grok homes. `-C` / `--cwd` / `--workspace` alone is **not** isolation.
 
@@ -110,11 +110,11 @@ timeout 120 agy "${AGY_ARGS[@]}" 2>/tmp/bt_agy.err \
 # NEVER fall back to gemini CLI; skip Google slot and note the gap
 ```
 
-Default pin: the newest `gemini-*-flash-high` slug from `agy models` (**`gemini-3.8-flash-high`** as of 2026-09-16). Empty `bt_agy_model` means account-tier.
+Default pin: the newest `gemini-*-flash-high` slug from `agy models` (**`gemini-3.8-flash-high`** as of 2026-10-07). Empty `bt_agy_model` means account-tier.
 
 ### Codex (GPT-6 Astra primary; identity isolated; workspace optional)
 
-Primary model: **`gpt-6-astra`** (OpenAI GPT-6 Astra). Fallback `gpt-5.6-sol`, then product default. Verified on Codex CLI 0.154.0 (`npm i -g @openai/codex@latest`). Because consults use `--ignore-user-config`, always pass **`-m`** explicitly.
+Primary model: **`gpt-6-astra`** (OpenAI GPT-6 Astra, frontier). Fallback `gpt-6.1-sol` (latest workhorse), then product default. Verified on Codex CLI 0.160.0 (`npm i -g @openai/codex@latest`). Because consults use `--ignore-user-config`, always pass **`-m`** explicitly.
 
 ```bash
 source /tmp/bt_models.env 2>/dev/null
@@ -126,7 +126,7 @@ elif [ -n "${bt_codex_model:-}" ]; then
 else
   CODEX_MODEL_ARGS=(-m "gpt-6-astra")
 fi
-CODEX_HOME="${bt_codex_home:-/tmp/bt-codex-home}" \
+CODEX_HOME="${bt_codex_home:-${TMPDIR:-/tmp}/bt-codex-home}" \
   timeout 150 codex exec --ephemeral --ignore-user-config --ignore-rules -s read-only --json --skip-git-repo-check \
   "${CODEX_MODEL_ARGS[@]}" \
   -C "${TMPDIR:-/tmp}" "$QUERY" < /dev/null 2>/tmp/bt_codex.err > /tmp/codex.json
@@ -161,9 +161,11 @@ source /tmp/bt_models.env 2>/dev/null
 
 #### Grok CLI (`bt_xai_via=grok`)
 
+Fallback only. Contract last verified on grok 1.0.30; re-dogfood before relying on it.
+
 ```bash
 source /tmp/bt_models.env 2>/dev/null || bt_grok_model=grok-4.7
-GROK_HOME="${bt_grok_home:-/tmp/bt-grok-home}" GROK_DISABLE_AUTOUPDATER=1 \
+GROK_HOME="${bt_grok_home:-${TMPDIR:-/tmp}/bt-grok-home}" GROK_DISABLE_AUTOUPDATER=1 \
   timeout 120 grok -p "$QUERY" -m "${bt_grok_model:-grok-4.7}" \
   --output-format json --disable-web-search --no-subagents 2>/tmp/bt_grok.err \
   | jq -r 'if .type=="error" then "GROK_FAILED: "+.message else .text end'

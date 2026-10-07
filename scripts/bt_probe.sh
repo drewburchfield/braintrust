@@ -9,31 +9,34 @@
 #   # or, when skill is installed as a plugin:
 #   bash "${CLAUDE_PLUGIN_ROOT:-.}/scripts/bt_probe.sh"
 #
-# Design notes (2026-09 dogfood):
+# Design notes (2026-10-07 dogfood):
 #  * Gemini CLI is NOT probed. Google voice = agy only.
 #  * Every peer runs IDENTITY-ISOLATED. Ambient agent-bus hooks (hcom), MCP servers,
 #    memories and plugins in the user's real home hijack headless consults (a grok
 #    consult once "joined the agent bus" instead of answering). Isolation per CLI:
-#      codex    -> CODEX_HOME=/tmp/bt-codex-home (auth only) + --ignore-user-config + --ignore-rules
-#      grok     -> GROK_HOME=/tmp/bt-grok-home (auth only; hooks/MCP/compat scanning off) + --no-subagents
+#      codex    -> CODEX_HOME=$TMPDIR/bt-codex-home (auth only) + --ignore-user-config + --ignore-rules
+#      grok     -> GROK_HOME=$TMPDIR/bt-grok-home (auth only; hooks/MCP/compat scanning off) + --no-subagents
 #      cursor   -> user's normal login + --mode ask (read-only: no shell, so no hcom join) +
-#                  no --approve-mcps + cmux hooks off (CMUX_CURSOR_HOOKS_DISABLED=1)
+#                  no --approve-mcps + cmux hooks off (CMUX_CURSOR_HOOKS_DISABLED=1).
+#                  ~/.cursor/plugins may still load; never pass --plugin-dir.
 #      opencode -> --pure (skips config plugins, verified to drop hcom.ts)
 #      claude   -> Task tool inside Claude Code; else claude -p --settings '{"disableAllHooks":true}'
-#      agy      -> no hook surface today; plain --print
+#      agy      -> plain --print. hcom/herdr hooks live in ~/.gemini/config/hooks.json (since
+#                  2026-09-23) and agy has no switch to skip them; verified 2026-10-07 that a
+#                  headless answer stays clean and registers no hcom agent.
 #  * xAI slot: Cursor CLI (cursor-agent) first, Grok CLI second, one xAI voice per consult.
-#    Cursor pins the newest `grok-X.Y-high` it lists (grok-4.7-high as of 2026-09-22).
+#    Cursor pins the newest `grok-X.Y-high` it lists (grok-4.7-high as of 2026-10-07).
 #    Cursor has no flag to skip ~/.cursor/hooks.json or user rules, so the hcom notice
 #    line and rules still reach context; ask mode keeps them from turning into actions.
 #  * Grok CLI default comes from `grok models` ("Default model:"); fallback grok-4.7.
-#  * Codex primary model is gpt-6-astra (GPT-6 Astra). Fallback order: gpt-6-astra ->
-#    gpt-5.6-sol -> product default. Because --ignore-user-config is set, we MUST pass -m.
+#  * Codex primary model is gpt-6-astra (GPT-6 Astra, frontier). Fallback order: gpt-6-astra ->
+#    gpt-6.1-sol (latest workhorse) -> product default. Because --ignore-user-config is set, we MUST pass -m.
 #    A usage-limit error is reported verbatim (bt_codex_error) instead of "empty/timeout".
 #  * OpenCode uses the user's configured/default model (opencode.json "model",
 #    else last non-free session model). Expected id contains glm-5.3 (zai-coding-plan/glm-5.3);
 #    the probe warns when it does not. If the resolved id contains glm-5.3, bt_opencode_variant=max.
 #  * agy Google pin is the newest `gemini-*-flash-high` slug `agy models` lists
-#    (gemini-3.8-flash-high as of 2026-09-16).
+#    (gemini-3.8-flash-high as of 2026-10-07).
 #  * Claude consult default is claude-opus-5-5[1m] (Opus 5.5, 1M context). Liveness probe uses haiku.
 #  * agy 1.1.0+ works bare-piped; PTY wrapper is a durable fallback.
 
@@ -145,7 +148,7 @@ security find-generic-password -s "Antigravity Safe Storage" >/dev/null 2>&1 || 
 
 # --- Antigravity (agy) - ONLY Google path ---
 # Pin the newest Gemini Flash (High) slug the account lists (gemini-3.8-flash-high as of
-# 2026-09). Parse --output-format json (.status / .response). Text + PTY remain fallbacks.
+# 2026-10). Parse --output-format json (.status / .response). Text + PTY remain fallbacks.
 resolve_agy_model() {
   local listing="$1"
   printf '%s\n' "$listing" \
@@ -188,15 +191,15 @@ probe_agy() {
 }
 
 # --- Codex (isolated clean-slate + ignore-user-config; primary model gpt-6-astra) ---
-# GPT-6 Astra is the flagship OpenAI model for this slot (verified on Codex CLI 0.154.0).
-# Fallback order: gpt-6-astra -> gpt-5.6-sol -> product default.
+# GPT-6 Astra is the frontier OpenAI model for this slot (verified on Codex CLI 0.160.0).
+# Fallback order: gpt-6-astra -> gpt-6.1-sol -> product default.
 # Usage-limit / auth errors are captured from the JSONL `error` event and reported.
 probe_codex() {
   printf 'bt_codex_available=false\nbt_codex_model=gpt-6-astra\nbt_codex_error=\n' > "$D/codex.env"
   command -v codex &>/dev/null || { echo "Codex: not installed" > "$D/codex.log"; return; }
   local out rc model="" ver err="" raw="$D/codex.jsonl"
   ver=$(codex --version 2>/dev/null | head -1)
-  for model in "gpt-6-astra" "gpt-5.6-sol" ""; do
+  for model in "gpt-6-astra" "gpt-6.1-sol" ""; do
     for a in 1 2; do
       local margs=()
       [ -n "$model" ] && margs=(-m "$model")
@@ -235,7 +238,8 @@ probe_codex() {
   fi
 }
 
-# --- Grok (Grok Build; advertised default from `grok models`, fallback grok-4.6) ---
+# --- Grok (Grok Build; xAI fallback only; advertised default from `grok models`, fallback grok-4.7) ---
+# Unverified since grok 1.0.30: not in active use as of 2026-10-07 (Cursor fills the xAI slot).
 resolve_grok_model() {
   local listing default cand
   listing=$(rt 30 env GROK_HOME="$bt_grok_home" GROK_DISABLE_AUTOUPDATER=1 grok models 2>/dev/null) || true
@@ -475,7 +479,7 @@ bt_opencode_variant=${bt_opencode_variant:-}
 bt_claude_cli_available=${bt_claude_cli_available:-false}
 bt_claude_model="${bt_claude_model:-claude-opus-5-5[1m]}"
 bt_probe_ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-bt_probe_version=1.13.0
+bt_probe_version=1.14.0
 EOF
 
 rm -rf "$D"

@@ -2,7 +2,7 @@
 
 <img src="https://ghrb.waren.build/banner?header=braintrust%20%F0%9F%A7%A0&subheader=Orchestrate%20AI%20CLIs%20for%20second%20opinions%20and%20research&bg=0a1628&secondaryBg=1e3a5f&color=e8f0fe&subheaderColor=7eb8da&headerFont=Inter&subheaderFont=Inter&support=false" alt="braintrust" width="100%">
 
-A multi-harness plugin from the [not-my-job](https://github.com/drewburchfield/not-my-job) marketplace. Primary host: [Claude Code](https://docs.anthropic.com/en/docs/claude-code). Also designed to work when the skill is loaded from Codex, Grok Build, OpenCode, or agy.
+A multi-harness plugin from the [not-my-job](https://github.com/drewburchfield/not-my-job) marketplace. Primary host: [Claude Code](https://docs.anthropic.com/en/docs/claude-code). Also designed to work when the skill is loaded from Codex, Cursor CLI, Grok Build, OpenCode, or agy.
 
 ![License](https://img.shields.io/badge/license-MIT-blue)
 
@@ -18,19 +18,19 @@ Delegates a task to peer AI CLIs in parallel. Second opinions on architecture, r
 - 6-step protocol: restatement, assumptions, evidence, fidelity, honesty, GROUNDED / NOT GROUNDED
 - Host actively curates context before delegating (not "whatever is in the chat")
 
-## Members (v1.13)
+## Members (v1.14)
 
 | Slot | CLI | Notes |
 |------|-----|-------|
 | Anthropic | Claude | `braintrust:peer` agent (Opus 5.5, 1M) inside Claude Code; `claude -p --model 'claude-opus-5-5[1m]' --settings '{"disableAllHooks":true}'` from other hosts |
-| Google | **agy only** | No Gemini CLI. Newest Flash High from `agy models` (**`gemini-3.8-flash-high`** as of 2026-09); `--output-format json` |
-| OpenAI | Codex | **`gpt-6-astra`** (GPT-6 Astra; fallback `gpt-5.6-sol`); isolated `CODEX_HOME` + `--ignore-user-config --ignore-rules`; CLI **0.154.0** verified |
-| xAI | Cursor CLI, else Grok CLI | Cursor: newest `grok-X.Y-high` (`grok-4.7-high` today), `--mode ask`. Grok CLI: `grok models` default, isolated `GROK_HOME` |
+| Google | **agy only** | No Gemini CLI. Newest Flash High from `agy models` (**`gemini-3.8-flash-high`** as of 2026-10); `--output-format json`. Loads user hooks (no switch) |
+| OpenAI | Codex | **`gpt-6-astra`** (GPT-6 Astra; fallback `gpt-6.1-sol`); isolated `CODEX_HOME` + `--ignore-user-config --ignore-rules`; CLI **0.160.0** verified |
+| xAI | Cursor CLI, else Grok CLI | Cursor: newest `grok-X.Y-high` (`grok-4.7-high` today), `--mode ask`. Grok CLI (optional fallback): `grok models` default, isolated `GROK_HOME` |
 | Multi | OpenCode | User's configured/default model (expected `zai-coding-plan/glm-5.3`); `--variant max` for GLM-5.3; `--pure` |
 
 Up to **five** independent voices when everything is installed and authenticated. Availability is decided by `scripts/bt_probe.sh`, not by preference.
 
-Every peer runs **identity-isolated**. The probe builds `/tmp/bt-codex-home` and `/tmp/bt-grok-home` (auth only), Cursor runs read-only (`--mode ask`, cmux hooks off, no MCP approval), OpenCode runs `--pure`, and the Claude peer skips CLAUDE.md and user hooks. Ambient agent-bus hooks (hcom) in the real homes otherwise hijack headless answers.
+Every peer runs **identity-isolated**. The probe builds `$TMPDIR/bt-codex-home` and `$TMPDIR/bt-grok-home` (auth only), Cursor runs read-only (`--mode ask`, cmux hooks off, no MCP approval), OpenCode runs `--pure`, and the Claude peer skips CLAUDE.md and user hooks. Ambient agent-bus hooks (hcom) in the real homes otherwise hijack headless answers. agy has no isolation switch for its hooks; braintrust watches its answers for bus chatter.
 
 ## Commands
 
@@ -39,6 +39,15 @@ Every peer runs **identity-isolated**. The probe builds `/tmp/bt-codex-home` and
 | `/braintrust` | Orchestrate a task across peer CLIs |
 | `/consult` | Alias for `/braintrust` |
 | `braintrust:peer` agent | Claude peer voice (Opus 5.5 1M, read-only) used by the Task tool |
+
+## v1.14.0 Highlights
+
+- **Harness refresh** dogfooded 2026-10-07: claude 2.1.292, agy 1.3.1, codex 0.160.0, cursor-agent 2026.10.01, opencode 1.18.34.
+- **Codex fallback → `gpt-6.1-sol`** (new catalog priority 1). Astra stays primary as the frontier model.
+- **agy hooks documented.** hcom and herdr hooks now load from `~/.gemini/config/hooks.json`; agy has no switch, so consults watch for bus chatter.
+- `cli-contracts.md` gains a Cursor contract and current versions; all references agree on Opus 5.5 and `grok-4.7`.
+- Doc fallbacks for isolated homes use `${TMPDIR:-/tmp}`, matching the probe.
+- Grok CLI marked optional and unverified since 1.0.30.
 
 ## v1.13.0 Highlights
 
@@ -79,11 +88,12 @@ All peers optional; braintrust uses whatever the probe authenticates.
 
 - [Claude Code](https://docs.anthropic.com/en/docs/claude-code)
 - [Antigravity CLI (agy)](https://antigravity.google/product/antigravity-cli) — `curl -fsSL https://antigravity.google/cli/install.sh | bash`
-- [Codex CLI](https://developers.openai.com/codex) — **0.154.0** verified for GPT-6 Astra (`npm i -g @openai/codex@latest`)
-- [Grok Build](https://docs.x.ai/build/overview) — `curl -fsSL https://x.ai/cli/install.sh | bash`
+- [Codex CLI](https://developers.openai.com/codex) — **0.160.0** verified for GPT-6 Astra (`npm i -g @openai/codex@latest`)
+- [Cursor CLI](https://cursor.com/docs/cli/overview) — `curl https://cursor.com/install -fsS | bash`, then `cursor-agent login` (xAI slot)
+- [Grok Build](https://docs.x.ai/build/overview) — optional xAI fallback, `curl -fsSL https://x.ai/cli/install.sh | bash`
 - [OpenCode](https://opencode.ai/docs/cli/) — with an authed provider; set `"model"` in `~/.config/opencode/opencode.json` so headless matches your TUI default
 
-`jq` required for Codex / Grok / OpenCode / agy JSON parsing.
+`jq` required for Codex / Cursor / Grok / OpenCode / agy JSON parsing.
 
 ## Install
 
@@ -95,7 +105,7 @@ claude plugins install braintrust@not-my-job
 
 ```bash
 bash scripts/bt_probe.sh
-bash evals/run_eval.sh matrix all agy,codex,grok,opencode
+bash evals/run_eval.sh matrix all agy,codex,cursor,opencode
 # deeper harness drift notes: skills/braintrust/references/self-improvement.md
 ```
 

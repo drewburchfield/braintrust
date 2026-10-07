@@ -16,7 +16,7 @@ cd "$ROOT"
 
 FIXTURE="${1:-contract-quiz}"
 VARIANT="${2:-all}"          # all | ab | skill-lean | skill-hybrid | skill-current | skill-full
-PEERS_CSV="${3:-all}"        # all | comma list: agy,codex,grok,opencode,claude
+PEERS_CSV="${3:-all}"        # all | comma list: agy,codex,cursor,grok,opencode,claude
 
 # Matrix mode is handled later; do not require fixtures/matrix.md
 if [[ "$FIXTURE" != "matrix" ]]; then
@@ -103,7 +103,7 @@ run_peer() {
       if [[ "${bt_codex_available:-true}" == "false" ]]; then
         echo "SKIPPED unavailable" >"$outdir/result.txt"; return
       fi
-      local home="${bt_codex_home:-/tmp/bt-codex-home}"
+      local home="${bt_codex_home:-${TMPDIR:-/tmp}/bt-codex-home}"
       local model_args=()
       if [[ -n "${bt_codex_model+x}" && -z "${bt_codex_model}" ]]; then
         model_args=()
@@ -135,7 +135,7 @@ run_peer() {
       if [[ "${bt_grok_available:-true}" == "false" ]]; then
         echo "SKIPPED unavailable" >"$outdir/result.txt"; return
       fi
-      GROK_HOME="${bt_grok_home:-/tmp/bt-grok-home}" GROK_DISABLE_AUTOUPDATER=1 \
+      GROK_HOME="${bt_grok_home:-${TMPDIR:-/tmp}/bt-grok-home}" GROK_DISABLE_AUTOUPDATER=1 \
         timeout 150 grok -p "$q" -m "${bt_grok_model:-grok-4.7}" \
         --output-format json --disable-web-search --no-subagents \
         2>"$outdir/stderr.txt" \
@@ -209,7 +209,7 @@ score_result() {
 
   # Q1: five members present; Gemini may be mentioned only as excluded
   local q1=0
-  echo "$t" | grep -qiE '\bagy\b' && echo "$t" | grep -qiE '\bcodex\b' && echo "$t" | grep -qiE '\bgrok\b' \
+  echo "$t" | grep -qiE '\bagy\b' && echo "$t" | grep -qiE '\bcodex\b' && echo "$t" | grep -qiE '\b(cursor|grok)\b' \
     && echo "$t" | grep -qiE '\bopencode\b' && echo "$t" | grep -qiE '\bclaude\b' && q1=1
   if echo "$t" | grep -qiE '\bgemini\b' && ! echo "$t" | grep -qiE 'not|never|no .*gemini|excluded|removed|not a member'; then
     q1=0

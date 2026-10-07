@@ -1,6 +1,6 @@
 # Skeptical Colleague / Grounding Protocol (shared)
 
-Use this protocol in every braintrust member prompt (Claude, agy, Codex, Grok, OpenCode) and in the native Grok grounded-colleague skill when present.
+Use this protocol in every braintrust member prompt (Claude, agy, Codex, Cursor or Grok, OpenCode) and in the native Grok grounded-colleague skill when present.
 
 ## Core Protocol
 

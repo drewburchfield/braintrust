@@ -11,7 +11,7 @@
 | Vision claims to text-only peers | Occasional | One Mode E peer; others get transcription + flag vision-dependent claims |
 | agy empty / hang (pre-1.1.0) | High historically | Probe bare first; PTY fallback; no gemini fallback |
 | Codex off-topic / memory contamination | Documented | Isolated `CODEX_HOME` + `--ignore-user-config` + `--ignore-rules` + scratch `-C` |
-| **Peer joins an agent bus (hcom) instead of answering** | Observed 2026-09-16 (grok) | Identity isolation on every CLI: `GROK_HOME`, `CODEX_HOME`, `--pure`, `braintrust:peer` / `disableAllHooks`. See "Ambient hooks" below |
+| **Peer joins an agent bus (hcom) instead of answering** | Observed 2026-09-16 (grok) | Identity isolation on every CLI: `GROK_HOME`, `CODEX_HOME`, Cursor `--mode ask`, `--pure`, `braintrust:peer` / `disableAllHooks`. agy has hooks but no switch. See "Ambient hooks" below |
 | Codex stdin hang | Common in harnesses | Always `< /dev/null` |
 | Codex timeout on binary-heavy tasks | Occasional | Pre-extract text artifacts; raise timeout only after context shrink |
 | Probe thrash (slow cold start marks CLI down) | Historical | Parallel probe, one warm retry, timeout = down without thrash |
@@ -26,9 +26,10 @@ The user's real homes carry SessionStart/PreToolUse hooks and plugins that talk 
 | codex | `~/.codex/hooks.json` + `hcom_*` keys in `config.toml` | `CODEX_HOME=$bt_codex_home` (no `hooks.json`) + `--ignore-user-config --ignore-rules` |
 | opencode | `~/.config/opencode/opencode.json` → `plugins/hcom.ts` | `--pure` |
 | claude | `~/.claude/settings.json` hooks | `braintrust:peer` agent inside Claude Code; `--settings '{"disableAllHooks":true}'` for `claude -p` |
-| agy | none today | plain `--print` |
+| cursor | `~/.cursor/hooks.json` (cmux, hcom notice), user rules, `~/.cursor/plugins` | `--mode ask` (no shell) + `CMUX_CURSOR_HOOKS_DISABLED=1` + no `--approve-mcps`/`--plugin-dir`. hcom notice still reaches context; verified it does not change answers |
+| agy | `~/.gemini/config/hooks.json` (hcom lifecycle + tool hooks, herdr; since 2026-09-23) | No switch to skip them. Verified 2026-10-07: headless answer clean, no hcom agent registered. Watch for bus chatter; skip the slot if it appears |
 
-The probe builds both isolated homes on every run. Never point a consult at `~/.grok` or `~/.codex`.
+The probe builds both isolated homes under `$TMPDIR` on every run. Never point a consult at `~/.grok` or `~/.codex`.
 
 ## Per-CLI table
 
@@ -41,6 +42,7 @@ The probe builds both isolated homes on every run. Never point a consult at `~/.
 | Empty after success previously | Quota (#56) | Stop calling agy this session; note gap |
 | Exit 0 with empty stdout | Dropped agent stream (fixed in 1.1.18) | Treat empty as failure; prefer `--output-format json` and check `.status` |
 | Pinned slug 404 | Older Flash generation retired | Probe picks the newest `gemini-*-flash-high` from `agy models`; re-run probe |
+| Answer mentions hcom / agent bus | `~/.gemini/config/hooks.json` hcom hooks fired | No isolation switch exists. Skip the Google slot and note it; do not edit the user's hooks from a consult |
 
 ### Codex
 
@@ -52,18 +54,30 @@ The probe builds both isolated homes on every run. Never point a consult at `~/.
 | `{"type":"error","message":"You've hit your usage limit…"}` | ChatGPT plan cap (reset time in message) | Skip slot; probe stores `bt_codex_error`; wait or `CODEX_API_KEY`. Do not retry other models |
 | `CODEX_FAILED: error` with no text | jq read `.error.message` only | `error` events put text on `.message`; use `$err.error.message // $err.message` |
 | Hook ran inside consult | `$CODEX_HOME/hooks.json` present | Isolated home must contain only `auth.json` + one-line `config.toml` |
+| `CODEX_FAILED` auth error with env not sourced | Fallback `/tmp/bt-codex-home` has no auth; probe built the home under `$TMPDIR` | `source /tmp/bt_models.env` first; fallbacks use `${TMPDIR:-/tmp}` |
+| Probe lands on `gpt-6.1-sol` | Astra unavailable for this account or CLI | Expected fallback; upgrade CLI or check plan. Note the model in coverage |
 
-### Grok
+### Cursor
+
+| Symptom | Cause | Fix |
+|---------|-------|-----|
+| `bt_cursor_error="not logged in"` | `cursor-agent status` lacks "Logged in as" | `cursor-agent login`; xAI slot falls to Grok CLI meanwhile |
+| Model id rejected | Grok generation renamed or retired | Re-run probe; it picks the newest `grok-X.Y-high` from `--list-models` |
+| Peer tried to run commands / edit | Ran without `--mode ask` or with `--force` | Always `--mode ask`; never `--force`, `--yolo`, `--approve-mcps`, `--plugin-dir` |
+| cmux feed noise | `CMUX_SURFACE_ID` inherited | `env -u CMUX_SURFACE_ID CMUX_CURSOR_HOOKS_DISABLED=1` |
+
+### Grok (fallback; not in active use)
 
 | Symptom | Cause | Fix |
 |---------|-------|-----|
 | `AuthorizationRequired` + 403 spending-limit | Billing cap | Credits / subscription / API key; **not** re-login |
 | Empty `.text` | Error object on stdout | Check `.type=="error"` first |
 | Opens TUI | Missing `-p` | Always `-p` for headless |
-| Model 404 on `grok-build` | Model renamed | Use `grok-4.6` (probe `Default model:`) |
+| Model 404 on `grok-build` | Model renamed | Use the probe's `Default model:` pick (fallback `grok-4.7`) |
 | Probe stuck on `grok-4.5` | Probe grepped for 4.5 while 4.6 is default | Parse `Default model:` from `grok models` |
 | `grok-composer-2.5-fast` 404 | Fast id removed | Use `grok-4.5` if you want the cheaper remaining id |
 | Answer is agent-bus chatter | `~/.grok/hooks/hcom.json` fired | `GROK_HOME=$bt_grok_home` (probe builds it) |
+| `grok models` says "You are not authenticated" | Logged out (seen on 1.0.46) | `grok login`; until then the listing only shows `grok-4.6`/`grok-4.5` and the slot stays on Cursor |
 | `--no-auto-update` missing from help | 1.0.30 hid the flag | `GROK_DISABLE_AUTOUPDATER=1` + `[cli] auto_update=false` in isolated config |
 
 ### OpenCode
@@ -83,7 +97,7 @@ The probe builds both isolated homes on every run. Never point a consult at `~/.
 |---------|-------|-----|
 | Nested session error | `claude -p` inside Claude Code | Task tool only |
 | Not logged in with `--bare` | Bare skips keychain | Drop `--bare` for consults (even when docs recommend it for CI) |
-| Consult landed on Sonnet / parent model | Task inherits parent unless an agent pins model | Use `subagent_type: "braintrust:peer"` (pins `claude-opus-4-8[1m]`) |
+| Consult landed on Sonnet / parent model | Task inherits parent unless an agent pins model | Use `subagent_type: "braintrust:peer"` (pins `claude-opus-5-5[1m]`) |
 | Hooks fired inside `claude -p` consult | User `settings.json` hooks | `--settings '{"disableAllHooks":true}'` (keeps OAuth) |
 
 ## Diagnostics (only when a consult fails)
@@ -98,17 +112,23 @@ timeout 60 agy --print "say ok" --dangerously-skip-permissions --output-format j
   ${bt_agy_model:+--model "$bt_agy_model"} 2>/tmp/bt_agy.err \
   | jq -r 'if .status=="SUCCESS" then .response else .error // .status end'
 
-# codex (GPT-6 Astra primary; CLI 0.154.0 verified)
-CODEX_HOME="${bt_codex_home:-/tmp/bt-codex-home}" \
+# codex (GPT-6 Astra primary; CLI 0.160.0 verified)
+CODEX_HOME="${bt_codex_home:-${TMPDIR:-/tmp}/bt-codex-home}" \
   codex exec --ephemeral --ignore-user-config --ignore-rules -s read-only --json --skip-git-repo-check \
   -m "${bt_codex_model:-gpt-6-astra}" \
   -C "${TMPDIR:-/tmp}" "say ok" < /dev/null 2>/tmp/bt_codex.err \
   | jq -rs '(map(select(.type=="error" or .type=="turn.failed")) | last) as $e
             | if $e then ($e.error.message // $e.message) else (map(select(.item.type?=="agent_message")) | last | .item.text) end'
 
-# grok (isolated home; no hooks)
-GROK_HOME="${bt_grok_home:-/tmp/bt-grok-home}" GROK_DISABLE_AUTOUPDATER=1 \
-  grok -p "say ok" -m "${bt_grok_model:-grok-4.6}" --output-format json --disable-web-search --no-subagents 2>/tmp/bt_grok.err \
+# cursor (xAI primary; read-only ask mode)
+( cd "${TMPDIR:-/tmp}" && env -u CMUX_SURFACE_ID CMUX_CURSOR_HOOKS_DISABLED=1 \
+  timeout 90 cursor-agent -p "say ok" --model "${bt_cursor_model:-grok-4.7-high}" \
+  --output-format json --mode ask --trust --workspace "${TMPDIR:-/tmp}" < /dev/null ) 2>/tmp/bt_cursor.err \
+  | jq -r '.result // .error'
+
+# grok (fallback; isolated home; no hooks)
+GROK_HOME="${bt_grok_home:-${TMPDIR:-/tmp}/bt-grok-home}" GROK_DISABLE_AUTOUPDATER=1 \
+  grok -p "say ok" -m "${bt_grok_model:-grok-4.7}" --output-format json --disable-web-search --no-subagents 2>/tmp/bt_grok.err \
   | jq -r 'if .type=="error" then .message else .text end'
 
 # opencode

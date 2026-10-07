@@ -48,7 +48,7 @@ Default multi-voice layout that worked repeatedly:
 
 1. **At least one** file/repo capable verifier (often Claude Task or agy with `--add-dir` / cwd)
 2. **At least one** isolated text adjudicator (often Codex clean-slate)
-3. Optional red-team (Grok) on the **same text package**
+3. Optional red-team (the xAI voice) on the **same text package**
 4. Host synthesis owns cross-checks
 
 ---
@@ -75,8 +75,8 @@ Never: global `~/.codex` with memories + MCP for a "neutral peer." That is how o
 |------|-----|
 | File/repo walk | Task in the project (Claude Code) already has tools; **tell it the paths and the verification mandate** |
 | Vision | Attach/read image in Task prompt; other peers get transcription |
-| Headless from other hosts | `claude -p --model 'claude-opus-4-8[1m]' --settings '{"disableAllHooks":true}'` with enough inline context; avoid `--bare` (auth dies) |
-| Inside Claude Code | Task tool `subagent_type: "braintrust:peer"` (Opus 4.8 1M, no CLAUDE.md, read-only) |
+| Headless from other hosts | `claude -p --model 'claude-opus-5-5[1m]' --settings '{"disableAllHooks":true}'` with enough inline context; avoid `--bare` (auth dies) |
+| Inside Claude Code | Task tool `subagent_type: "braintrust:peer"` (Opus 5.5 1M, no CLAUDE.md, read-only) |
 | Nested | Never `claude -p` from inside Claude Code |
 
 Claude is usually your **best file-capable verifier** when the host is Claude Code. Use it that way deliberately; do not waste it on pure prose-only tasks if another peer can adjudicate text.
@@ -87,15 +87,25 @@ Claude is usually your **best file-capable verifier** when the host is Claude Co
 |------|-----|
 | Headless answer | `--print` + `--output-format json` + `--dangerously-skip-permissions`; parse `.response` |
 | Extra roots | `--add-dir` (repeatable) when files live outside cwd |
-| Model pin | `--model "$bt_agy_model"` (newest `gemini-*-flash-high`; `gemini-3.8-flash-high` as of 2026-09). Slugs from `agy models` |
+| Model pin | `--model "$bt_agy_model"` (newest `gemini-*-flash-high`; `gemini-3.8-flash-high` as of 2026-10-07). Slugs from `agy models` |
 | No `@path` | **Inline** or ensure cwd/`--add-dir` and tell it relative paths |
 | Artifacts | It may write under its brain dir; host should copy useful drafts back into the repo |
+| Identity | No isolation switch. `~/.gemini/config/hooks.json` (hcom, herdr) loads on every run; keep packages self-contained and watch for bus chatter |
 
-### Grok
+### Cursor (xAI primary)
 
 | Need | How |
 |------|-----|
-| Clean headless | `GROK_HOME=$bt_grok_home GROK_DISABLE_AUTOUPDATER=1 grok -p` + `--output-format json --disable-web-search --no-subagents` + model `grok-4.6`. The real `~/.grok` carries agent-bus hooks |
+| Clean headless | `cursor-agent -p --mode ask --output-format json --trust --workspace "$TMPDIR"` from `$TMPDIR` with `env -u CMUX_SURFACE_ID CMUX_CURSOR_HOOKS_DISABLED=1`; model `$bt_cursor_model` |
+| Repo walk (Mode C) | `--workspace /path/to/repo` (+ `--add-dir`); keep `--mode ask` |
+| Tools / MCP | Ask mode has no shell and no writes. Never `--force`, `--approve-mcps`, `--plugin-dir` |
+| Identity | Normal login. User rules, `~/.cursor/hooks.json`, and `~/.cursor/plugins` still load; ask mode keeps them from acting |
+
+### Grok (fallback; not in active use)
+
+| Need | How |
+|------|-----|
+| Clean headless | `GROK_HOME=$bt_grok_home GROK_DISABLE_AUTOUPDATER=1 grok -p` + `--output-format json --disable-web-search --no-subagents` + the probe's model (fallback `grok-4.7`). The real `~/.grok` carries agent-bus hooks |
 | Avoid repo litter | `--cwd` scratch optional |
 | Tools / MCP | **Prefer off.** History: MCP spawn failures and thrashing on broken `read_file` produced empty consults. |
 | If tools needed | Prefer `--disable-web-search` unless research is the point; put file contents in the prompt; permission mode stay non-write for opinions |

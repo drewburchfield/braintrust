@@ -3,7 +3,7 @@
 Harnesses ship weekly. This plugin drifts unless it re-verifies. Run this cycle when:
 
 - A consult fails with a new error shape
-- A CLI major/minor bumps (`claude --version`, `agy --version`, `codex --version`, `grok --version`, `opencode --version`)
+- A CLI major/minor bumps (`claude --version`, `agy --version`, `codex --version`, `cursor-agent --version`, `grok --version`, `opencode --version`)
 - The user says "refresh braintrust", "dogfood braintrust", or "update harness docs"
 - Roughly monthly even if nothing failed
 
@@ -14,7 +14,7 @@ Harnesses ship weekly. This plugin drifts unless it re-verifies. Run this cycle 
 Shell wrappers (cmux, hcom) may shadow the binaries in interactive zsh. Call them through `bash -c` or by absolute path (`~/.local/bin/<cli>`) when `--version` prints a wrapper error.
 
 ```bash
-for c in claude agy codex grok opencode; do
+for c in claude agy codex cursor-agent grok opencode; do
   echo "==== $c ===="
   command -v $c && $c --version 2>&1 | head -3
   $c --help 2>&1 | head -40
@@ -24,6 +24,8 @@ codex exec --help 2>&1 | head -80
 codex review --help 2>&1 | head -40
 opencode run --help 2>&1 | head -60
 agy models 2>&1 | head -20
+(cd "${TMPDIR:-/tmp}" && cursor-agent --list-models 2>&1 | grep -i grok)
+cat ~/.gemini/config/hooks.json ~/.cursor/hooks.json 2>/dev/null | grep -c hcom   # new hook surfaces
 grok models 2>&1 | head -20
 jq -r '.models[].slug' ~/.codex/models_cache.json 2>/dev/null   # OpenAI model catalog seen by this CLI
 opencode models 2>&1 | head -40
@@ -68,6 +70,7 @@ Update in this order:
 | Claude Code | https://code.claude.com/docs/en/headless |
 | agy | https://antigravity.google/docs/cli/overview + `agy --help` |
 | Codex | https://developers.openai.com/codex/noninteractive |
+| Cursor CLI | https://cursor.com/docs/cli/overview + `cursor-agent --help` |
 | Grok Build | https://docs.x.ai/build/overview |
 | OpenCode | https://opencode.ai/docs/cli/ |
 
@@ -76,12 +79,15 @@ Treat local `--help` + dogfood as higher priority than blog posts.
 ## Exit criteria for a refresh
 
 - [ ] Probe writes a complete `/tmp/bt_models.env` (includes `bt_codex_model=gpt-6-astra` when Astra works, `bt_codex_error` when it does not)
-- [ ] Codex CLI ≥ 0.154.0 (`codex --version`); `~/.codex/models_cache.json` still lists `gpt-6-astra`
+- [ ] Codex CLI ≥ 0.160.0 (`codex --version`); `~/.codex/models_cache.json` still lists `gpt-6-astra` (and `gpt-6.1-sol` as fallback). If a newer frontier model outranks Astra, move the pin
 - [ ] Every `bt_*=true` CLI returns a one-word headless ok **from its isolated home** (no agent-bus / hcom text in the answer)
 - [ ] SKILL + references mention no `gemini` binary path
-- [ ] Default Grok model matches `Default model:` from `grok models` (`grok-4.6` as of 2026-09)
-- [ ] agy pin is the newest `gemini-*-flash-high` in `agy models` (`gemini-3.8-flash-high` as of 2026-09)
-- [ ] Claude consult model is `claude-opus-4-8[1m]` in `agents/peer.md` and the probe (haiku only for liveness); bump only when a model above Opus 5 ships
+- [ ] Cursor pin is the newest `grok-X.Y-high` in `cursor-agent --list-models` (`grok-4.7-high` as of 2026-10-07)
+- [ ] Grok CLI (only if in use): default matches `Default model:` from an authenticated `grok models`
+- [ ] agy pin is the newest `gemini-*-flash-high` in `agy models` (`gemini-3.8-flash-high` as of 2026-10-07)
+- [ ] agy and Cursor answers carry no hcom / agent-bus text (both load user hooks with no switch)
+- [ ] Claude consult model is `claude-opus-5-5[1m]` in `agents/peer.md` and the probe (haiku only for liveness); bump when a newer Opus ships
 - [ ] OpenCode model matches an authed provider (`opencode auth list`) and contains `glm-5.3` (`bt_opencode_variant=max`)
-- [ ] `--pure`, `GROK_HOME`, `CODEX_HOME`, and `disableAllHooks` still neutralize the hooks listed in `failure-modes.md`
+- [ ] `--pure`, `GROK_HOME`, `CODEX_HOME`, Cursor `--mode ask`, and `disableAllHooks` still neutralize the hooks listed in `failure-modes.md`
+- [ ] `git grep` for the previous model ids and CLI versions returns only CHANGELOG hits
 - [ ] Version bumped; session note saved under `.braintrust/sessions/`

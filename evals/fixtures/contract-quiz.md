@@ -20,7 +20,7 @@ Score how well a peer answers from the **skill text only** (variant injected bel
 
 | ID | Correct if answer includes | Points |
 |----|---------------------------|--------|
-| Q1 | claude, agy, codex, grok, opencode; Gemini CLI not a member | 1 |
+| Q1 | claude, agy, codex, cursor (or grok) for xAI, opencode; Gemini CLI not a member | 1 |
 | Q2 | CODEX_HOME isolated; --ignore-user-config or ephemeral+read-only; stdin closed /dev/null; gpt-6-astra (Astra) | 1 |
 | Q3 | opencode run --format json --auto --pure; -m only if bt_opencode_model set | 1 |
 | Q4 | cursor-agent -p; grok-4.7-high; output-format json; --mode ask | 1 |

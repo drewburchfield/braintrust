@@ -7,7 +7,7 @@ Consult peer AI CLIs in parallel for second opinions. **No Gemini CLI.**
 |------|-----|---------|
 | Anthropic | Claude | `braintrust:peer` agent (Task tool) inside Claude Code; else `claude -p --model 'claude-opus-5-5[1m]' --settings '{"disableAllHooks":true}' --output-format json` |
 | Google | **agy only** | newest `gemini-*-flash-high` from probe (`gemini-3.8-flash-high`); `agy --print` + `--output-format json` + `--dangerously-skip-permissions` (PTY wrapper if bare hangs) |
-| OpenAI | Codex | **gpt-6-astra** (GPT-6 Astra; fallback gpt-5.6-sol); isolated clean profile; CLI 0.154.0 |
+| OpenAI | Codex | **gpt-6-astra** (GPT-6 Astra; fallback gpt-6.1-sol); isolated clean profile; CLI 0.160.0 |
 | xAI | Cursor CLI, else Grok CLI (`bt_xai_via`) | Cursor: `grok-4.7-high`, `--mode ask`; Grok CLI: `grok-4.7`, isolated `GROK_HOME` |
 | Multi | OpenCode | User default model from probe (expected `zai-coding-plan/glm-5.3`); `--variant max` when id contains `glm-5.3`; `--pure` |
 
@@ -44,14 +44,14 @@ timeout 120 agy --print "$QUERY" --dangerously-skip-permissions --output-format 
 
 **Codex (GPT-6 Astra primary; identity isolated; workspace optional):**
 ```bash
-CODEX_HOME="${bt_codex_home:-/tmp/bt-codex-home}" \
+CODEX_HOME="${bt_codex_home:-${TMPDIR:-/tmp}/bt-codex-home}" \
   timeout 150 codex exec --ephemeral --ignore-user-config --ignore-rules -s read-only --json --skip-git-repo-check \
   -m "${bt_codex_model:-gpt-6-astra}" \
   -C "${TMPDIR:-/tmp}" "$QUERY" < /dev/null 2>/tmp/bt_codex.err > /tmp/codex.json
 jq -rs '(map(select(.type=="error" or .type=="turn.failed")) | last) as $e
   | if $e then "CODEX_FAILED: "+($e.error.message // $e.message) else (map(select(.item.type? == "agent_message")) | last | .item.text) end' /tmp/codex.json
 ```
-Primary model: **`gpt-6-astra`**. Codex CLI 0.154.0 verified. Always pass `-m` with `--ignore-user-config`. A usage-limit error is a plan cap: skip the slot. For repo walk: same isolation + Astra pin, set `-C` to the repo. Always close stdin.  
+Primary model: **`gpt-6-astra`**. Codex CLI 0.160.0 verified. Always pass `-m` with `--ignore-user-config`. A usage-limit error is a plan cap: skip the slot. For repo walk: same isolation + Astra pin, set `-C` to the repo. Always close stdin.  
 **`-C` alone is not isolation.** Off-topic answers usually mean missing clean `CODEX_HOME` and/or `--ignore-user-config` (memories/MCP/user config still loaded).
 
 **xAI via Cursor CLI (`bt_xai_via=cursor`):**
@@ -64,7 +64,7 @@ Primary model: **`gpt-6-astra`**. Codex CLI 0.154.0 verified. Always pass `-m` w
 
 **xAI via Grok CLI (`bt_xai_via=grok`):**
 ```bash
-GROK_HOME="${bt_grok_home:-/tmp/bt-grok-home}" GROK_DISABLE_AUTOUPDATER=1 \
+GROK_HOME="${bt_grok_home:-${TMPDIR:-/tmp}/bt-grok-home}" GROK_DISABLE_AUTOUPDATER=1 \
   timeout 120 grok -p "$QUERY" -m "${bt_grok_model:-grok-4.7}" --output-format json --disable-web-search --no-subagents 2>/tmp/bt_grok.err \
   | jq -r 'if .type=="error" then "GROK_FAILED: "+.message else .text end'
 ```

@@ -87,7 +87,7 @@ Claude is usually your **best file-capable verifier** when the host is Claude Co
 |------|-----|
 | Headless answer | `--print` + `--output-format json` + `--dangerously-skip-permissions`; parse `.response` |
 | Extra roots | `--add-dir` (repeatable) when files live outside cwd |
-| Model pin | `--model "$bt_agy_model"` (newest `gemini-*-flash-high`; `gemini-3.8-flash-high` as of 2026-10-07). Slugs from `agy models` |
+| Model pin | `--model "$bt_agy_model"` (strongest `gemini-*-high`; `gemini-4-argon-high` as of 2026-10-16, fast `$bt_agy_fast_model`). Slugs from `agy models` |
 | No `@path` | **Inline** or ensure cwd/`--add-dir` and tell it relative paths |
 | Artifacts | It may write under its brain dir; host should copy useful drafts back into the repo |
 | Identity | No isolation switch. `~/.gemini/config/hooks.json` (hcom, herdr) loads on every run; keep packages self-contained and watch for bus chatter |

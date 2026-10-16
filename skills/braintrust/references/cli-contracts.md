@@ -1,4 +1,4 @@
-# CLI Contracts (dogfooded 2026-10-07)
+# CLI Contracts (dogfooded 2026-10-16)
 
 Source of truth for invocation shapes. Re-verify with `scripts/bt_probe.sh` and the self-improvement cycle when harnesses update.
 
@@ -6,25 +6,25 @@ Source of truth for invocation shapes. Re-verify with `scripts/bt_probe.sh` and 
 
 | Slot | Binary | Default model | Headless contract |
 |------|--------|---------------|-------------------|
-| Google AI | `agy` | newest `gemini-*-flash-high` listed (**`gemini-3.8-flash-high`** as of 2026-10-07) | `--print` + `--output-format json` + `--dangerously-skip-permissions` + `--model`; PTY if needed; parse `.status` / `.response` |
+| Google AI | `agy` | strongest `gemini-*-high` listed (**`gemini-4-argon-high`** as of 2026-10-16; fast fallback `gemini-3.8-flash-high`) | `--print` + `--output-format json` + `--dangerously-skip-permissions` + `--model`; PTY if needed; parse `.status` / `.response` |
 | OpenAI | `codex` | **`gpt-6-astra`** (GPT-6 Astra; fallback `gpt-6.1-sol`) | `exec --ephemeral --ignore-user-config --ignore-rules -s read-only --json --skip-git-repo-check -m gpt-6-astra` + isolated `CODEX_HOME` + `< /dev/null`; fail on `error` / `turn.failed` |
-| xAI (primary) | `cursor-agent` | newest `grok-X.Y-high` from `--list-models` (**`grok-4.7-high`** as of 2026-10-07) | `-p` + `--model` + `--output-format json --mode ask --trust --workspace $TMPDIR` + `env -u CMUX_SURFACE_ID CMUX_CURSOR_HOOKS_DISABLED=1` + cwd `$TMPDIR` + `< /dev/null` → `jq` `.result` (check `.is_error` first) |
+| xAI (primary) | `cursor-agent` | newest `grok-X.Y-high` from `--list-models` (**`grok-4.7-high`** as of 2026-10-16) | `-p` + `--model` + `--output-format json --mode ask --trust --workspace $TMPDIR` + `env -u CMUX_SURFACE_ID CMUX_CURSOR_HOOKS_DISABLED=1` + cwd `$TMPDIR` + `< /dev/null` → `jq` `.result` (check `.is_error` first) |
 | xAI (fallback) | `grok` | `grok models` Default model (fallback `grok-4.7`); unverified since 1.0.30 | isolated `GROK_HOME` + `GROK_DISABLE_AUTOUPDATER=1` + `-p` + `-m` + `--output-format json --disable-web-search --no-subagents` → `jq` `.text` (check `.type=="error"` first). Large packages: `--prompt-file` |
 | Multi-provider | `opencode` | **User default** (config `model`, else last non-free session; expected `zai-coding-plan/glm-5.3`) | `run --format json --auto --pure` (+ `-m` when probe set a model; `--variant max` for glm-5.3) → last `type=="text"` event; check `type=="error"` |
 | Anthropic | `claude` | `claude-opus-5-5[1m]` (Opus 5.5, 1M context) | Host Claude Code: **`braintrust:peer` agent** via Task tool. Other hosts: `claude -p --model 'claude-opus-5-5[1m]' --settings '{"disableAllHooks":true}' --output-format json` → `.result`. No `--bare` |
 
 **Do not call `gemini`.** Free-tier/OAuth sunset and constant thrash with agy. Google voice is **agy only**.
 
-## Versions verified (local, 2026-10-07)
+## Versions verified (local, 2026-10-16)
 
 | CLI | Version | Notes |
 |-----|---------|-------|
 | claude | 2.1.292 | Nested `claude -p` blocked inside Claude Code. Consult model **`claude-opus-5-5[1m]`** (accepted by `--model` and by agent frontmatter `model:`). `--settings '{"disableAllHooks":true}'` keeps OAuth and skips user hooks. `--bare` still skipped |
-| agy | 1.3.1 | `agy models` lists Gemini 3.8/3.7/3.6 Flash (High/Medium/Low), 3.1 Pro, plus Claude Opus/Sonnet 5.5 and GPT-OSS display entries. New: `agy mcp`, `agy plugin`, `--mode accept-edits/plan`, `--input-format stream-json`. Reads hooks from `~/.gemini/config/hooks.json` (hcom + herdr installed 2026-09-23) |
-| codex | **0.160.0** | Model catalog: `gpt-6.1-sol` (priority 1, "latest workhorse"), `gpt-6-astra` (priority 2, "frontier intelligence"), `gpt-6-sol`, `gpt-6-luna`, `gpt-reserve`, `gpt-5.6-sol/terra/luna`, `gpt-5.5`. Braintrust keeps Astra first because it is the strongest reasoner. New exec flags: `--strict-config`, `--thread-source`, `--enable/--disable <FEATURE>`. `$CODEX_HOME/hooks.json` is honored, so the isolated home must not carry one |
-| cursor-agent | 2026.10.01 | `--list-models` lists `grok-4.7-{low,medium,high,xhigh}[-fast]` and `cursor-grok-4.6-*`. `--mode` choices: `plan`, `ask`. New: `--sandbox enabled/disabled`, `--plugin-dir`, `--auto-review`, `--add-dir`, `models` subcommand. Parameterized ids accept bracket overrides (`'model[effort=high]'`) |
-| grok | 1.0.46 | Not in active use; logged out on 2026-10-07, so `grok models` only shows `grok-4.6`/`grok-4.5`. All documented flags still in `--help`. Contract last dogfooded on 1.0.30 |
-| opencode | 1.18.34 | `run --format json --auto --pure`; `--variant` for reasoning effort. `zai-coding-plan/glm-5.3` still listed (also `glm-5.3-flash`, `glm-5.3-highspeed`) |
+| agy | 1.4.0 | `agy models` lists **Gemini 4 Argon** (`gemini-4-argon-{high,medium,low}`, new) and Gemini 3.8 Flash (High/Medium/Low), plus Claude Opus/Sonnet 5.5 and `gpt-oss-120b-medium` display entries. 3.7/3.6 Flash and 3.1 Pro are gone. `--mode` is now `accept-edits`, `auto`, `plan`; `--effort` adds `xhigh` and `max`. New `--remote-control` flag plus `remote-control` and `mic-serve` subcommands (never use in consults). Reads hooks from `~/.gemini/config/hooks.json` (hcom + herdr, unchanged since 2026-09-23) |
+| codex | **0.160.0** | Model catalog: `gpt-6.1-sol` (priority 1, "latest workhorse"), `gpt-6-astra` (priority 2, "frontier intelligence"), `gpt-6-sol`, `gpt-6-luna`, `gpt-reserve`, `gpt-5.6-sol/terra/luna`, `codex-auto-review` (internal approval reviewer). `gpt-5.5` has left the catalog. Braintrust keeps Astra first because it is the strongest reasoner. Exec flags: `--strict-config`, `--thread-source`, `--enable/--disable <FEATURE>`, `-p/--profile` (layers `$CODEX_HOME/<name>.config.toml`), `--worktree`, `--approve-for-me`, `--dangerously-bypass-hook-trust`. Consults use none of the last three. `$CODEX_HOME/hooks.json` is honored, so the isolated home must not carry one |
+| cursor-agent | 2026.10.14 | `--list-models` tops out at `grok-4.7-{low,medium,high,xhigh}[-fast]` (no 4.8), plus `cursor-grok-4.6-*`/`4.5-*`. Also lists `gemini-4-argon-*`, `claude-fable-5-1-*`, `kimi-k3-*`, `glm-5.2-*`, `muse-*`. `--mode` choices: `plan`, `ask`. New: `-w/--worktree`, `--worktree-base`, `--skip-worktree-setup`, `--plan` (= `--mode plan`), `persist`/`worker`/`team`/`bedrock` subcommands. Still: `--sandbox`, `--plugin-dir`, `--auto-review`, `--add-dir`. Parameterized ids accept bracket overrides (`'model[effort=high]'`) |
+| grok | 1.0.46 | Not in active use; still logged out on 2026-10-16 (`Not signed in … grok login --device-code`), so `grok models` only shows `grok-4.6`/`grok-4.5`. All documented flags still in `--help`. Contract last dogfooded on 1.0.30 |
+| opencode | 1.18.34 | `run --format json --auto --pure`; `--variant` for reasoning effort. `zai-coding-plan/glm-5.3` still listed (also `glm-5.3-flash`, `glm-5.3-highspeed`). `glm-5.3-highspeed` is not on the Coding Plan: it returns a retryable 429 and OpenCode retries for ~80s |
 
 ## Ambient contamination (why isolation is mandatory)
 
@@ -43,13 +43,14 @@ else
 fi 2>/tmp/bt_agy.err | jq -r 'if .status=="SUCCESS" then .response else "AGY_FAILED: "+(.error // .status // "empty") end'
 ```
 
-- Probe writes `bt_agy_model` as the newest `gemini-<major>.<minor>-flash-high` slug in `agy models` (`gemini-3.8-flash-high` on 2026-10-07). Empty means account-tier.
-- **Hooks.** `~/.gemini/config/hooks.json` carries hcom (PreInvocation, PreToolUse, PostToolUse, PostInvocation, Stop) and herdr hooks. agy has no flag or env var to skip them. Verified 2026-10-07: a headless `--print` answer stayed on topic and no agent joined the hcom bus. If an answer mentions hcom, an agent bus, or a 4-letter agent name, skip the Google slot and note it.
-- `--model` accepts slugs and display names. Prefer slugs. `gemini-3.1-pro-high` exists but is slower; Flash High is the consult default.
+- Probe writes `bt_agy_model` as the strongest `gemini-*-high` slug in `agy models`: newest generation first, non-Flash wins a tie (`gemini-4-argon-high` on 2026-10-16). `bt_agy_fast_model` is the newest `gemini-*-flash-high` (`gemini-3.8-flash-high`); the probe falls back to it when the pin fails. Use it for quick Goal Card checks. Empty `bt_agy_model` means account-tier.
+- Latency (2026-10-16, one-word answer): Argon High ~6.7s of agy time, Flash High ~2.7s.
+- **Hooks.** `~/.gemini/config/hooks.json` carries hcom (PreInvocation, PreToolUse, PostToolUse, PostInvocation, Stop) and herdr hooks. agy has no flag or env var to skip them. Verified 2026-10-16 on agy 1.4.0: headless `--print` answers stayed on topic and no agent joined the hcom bus. If an answer mentions hcom, an agent bus, or a 4-letter agent name, skip the Google slot and note it.
+- `--model` accepts slugs and display names. Prefer slugs. Gemini 3.1 Pro is gone from agy 1.4.0.
 - No `@path` includes. Inline file content. Display names from `agy models` may include third-party brands (Claude, GPT-OSS); that is **not** an instruction to run the Gemini CLI or to route Claude through agy.
 - `--print-timeout` is unreliable as a hard bound; use external `timeout` or the PTY wrapper.
 - macOS: warm keychain before first call if OAuth re-prompts: `security find-generic-password -s "Antigravity Safe Storage" >/dev/null 2>&1 || true`
-- Optional: `--effort high|medium|low` (Flash High already bakes high into the slug). `--json-schema` for structured answers. `--disable-slash-commands` for evals. `--sandbox` when the peer may run commands.
+- Optional: `--effort low|medium|high|xhigh|max` (the `-high` slug already bakes high in). Never `--remote-control` or `--mode auto` in a consult. `--json-schema` for structured answers. `--disable-slash-commands` for evals. `--sandbox` when the peer may run commands.
 
 ## Codex
 
@@ -74,6 +75,7 @@ jq -rs '
 - **Identity isolation is mandatory for unbiased review.** Isolated `CODEX_HOME` (auth only, no `hooks.json`, no MCP) + `--ignore-user-config` + `--ignore-rules`. This is separate from workspace access.
 - **Model:** default `gpt-6-astra`. Probe writes `bt_codex_model`. Empty means product default (Astra and 6.1 Sol unavailable; upgrade CLI). `bt_codex_error` carries the last error text when the probe marked Codex unavailable.
 - **Usage limit:** `You've hit your usage limit … try again at <date>` is a plan cap. Skip the slot, record the reset time, do not retry other models (the probe stops on the first such error).
+- **Never** pass `--approve-for-me`, `--dangerously-bypass-hook-trust`, `--worktree`, or `-p/--profile` in a consult. A profile layers config back in and defeats `--ignore-user-config`.
 - **Effort:** `-c model_reasoning_effort="high"` (or `xhigh`/`max`) when the package is hard; `ultra` enables automatic delegation and is not for consults.
 - **Workspace:** `-C /tmp` + inline evidence (Mode B default), or cwd/repo when Mode C (keep isolated home either way).
 - Always close stdin with `< /dev/null`. Stderr may still print `Reading additional input from stdin...`; that line alone is **not** a hang if JSONL completed.
@@ -96,7 +98,7 @@ source /tmp/bt_models.env 2>/dev/null
 
 - **Login.** Uses the normal Cursor login (`cursor-agent status` must say "Logged in as"). The probe writes `bt_cursor_error="not logged in"` otherwise.
 - **Model.** Probe picks the newest `grok-X.Y-high` (or `cursor-grok-X.Y-high`) slug from `--list-models`. `grok-4.7-xhigh` exists for hard packages; pass it explicitly.
-- **Guardrails.** `--mode ask` is read-only Q&A with no shell, so ambient hooks and rules cannot turn into actions. Never add `--force`/`--yolo`, `--approve-mcps`, `--auto-review`, or `--plugin-dir`.
+- **Guardrails.** `--mode ask` is read-only Q&A with no shell, so ambient hooks and rules cannot turn into actions. Never add `--force`/`--yolo`, `--approve-mcps`, `--auto-review`, `--plugin-dir`, `-w/--worktree`, or `--plan`.
 - **Leaks.** Cursor has no switch for `~/.cursor/hooks.json`, user rules, or `~/.cursor/plugins`. `CMUX_CURSOR_HOOKS_DISABLED=1` silences the cmux hooks; the hcom notice line and rules still reach context.
 - **Mode C.** Point `--workspace` (and `--add-dir`) at the repo; keep `--mode ask`.
 - Success JSON: `.result`, `.is_error`, `.session_id`. Always close stdin.

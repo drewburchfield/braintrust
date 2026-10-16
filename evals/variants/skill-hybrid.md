@@ -6,7 +6,7 @@ Consult peer AI CLIs in parallel for second opinions. **No Gemini CLI.**
 | Slot | CLI | Default |
 |------|-----|---------|
 | Anthropic | Claude | `braintrust:peer` agent (Task tool) inside Claude Code; else `claude -p --model 'claude-opus-5-5[1m]' --settings '{"disableAllHooks":true}' --output-format json` |
-| Google | **agy only** | newest `gemini-*-flash-high` from probe (`gemini-3.8-flash-high`); `agy --print` + `--output-format json` + `--dangerously-skip-permissions` (PTY wrapper if bare hangs) |
+| Google | **agy only** | strongest `gemini-*-high` from probe (`gemini-4-argon-high`; fast `gemini-3.8-flash-high`); `agy --print` + `--output-format json` + `--dangerously-skip-permissions` (PTY wrapper if bare hangs) |
 | OpenAI | Codex | **gpt-6-astra** (GPT-6 Astra; fallback gpt-6.1-sol); isolated clean profile; CLI 0.160.0 |
 | xAI | Cursor CLI, else Grok CLI (`bt_xai_via`) | Cursor: `grok-4.7-high`, `--mode ask`; Grok CLI: `grok-4.7`, isolated `GROK_HOME` |
 | Multi | OpenCode | User default model from probe (expected `zai-coding-plan/glm-5.3`); `--variant max` when id contains `glm-5.3`; `--pure` |

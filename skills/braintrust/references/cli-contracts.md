@@ -11,7 +11,7 @@ Source of truth for invocation shapes. Re-verify with `scripts/bt_probe.sh` and 
 | xAI (primary) | `cursor-agent` | newest `grok-X.Y-high` from `--list-models` (**`grok-4.7-high`** as of 2026-10-16) | `-p` + `--model` + `--output-format json --mode ask --trust --workspace $TMPDIR` + `env -u CMUX_SURFACE_ID CMUX_CURSOR_HOOKS_DISABLED=1` + cwd `$TMPDIR` + `< /dev/null` → `jq` `.result` (check `.is_error` first) |
 | xAI (fallback) | `grok` | `grok models` Default model (fallback `grok-4.7`); unverified since 1.0.30 | isolated `GROK_HOME` + `GROK_DISABLE_AUTOUPDATER=1` + `-p` + `-m` + `--output-format json --disable-web-search --no-subagents` → `jq` `.text` (check `.type=="error"` first). Large packages: `--prompt-file` |
 | Multi-provider | `opencode` | **User default** (config `model`, else last non-free session; expected `zai-coding-plan/glm-5.3`) | `run --format json --auto --pure` (+ `-m` when probe set a model; `--variant max` for glm-5.3) → last `type=="text"` event; check `type=="error"` |
-| Anthropic | `claude` | `claude-opus-5-5[1m]` (Opus 5.5, 1M context) | Host Claude Code: **`braintrust:peer` agent** via Task tool. Other hosts: `claude -p --model 'claude-opus-5-5[1m]' --settings '{"disableAllHooks":true}' --output-format json` → `.result`. No `--bare` |
+| Anthropic | `claude` | `claude-opus-5-5[1m]` (Opus 5.5, 1M context) | Host Claude Code: **`braintrust:peer` agent** via Task tool. Other hosts: `claude -p --model 'claude-opus-5-5[1m]' --safe-mode --settings '{"disableAllHooks":true}' --output-format json` → `.result`. No `--bare` |
 
 **Do not call `gemini`.** Free-tier/OAuth sunset and constant thrash with agy. Google voice is **agy only**.
 
@@ -19,8 +19,8 @@ Source of truth for invocation shapes. Re-verify with `scripts/bt_probe.sh` and 
 
 | CLI | Version | Notes |
 |-----|---------|-------|
-| claude | 2.1.292 | Nested `claude -p` blocked inside Claude Code. Consult model **`claude-opus-5-5[1m]`** (accepted by `--model` and by agent frontmatter `model:`). `--settings '{"disableAllHooks":true}'` keeps OAuth and skips user hooks. `--bare` still skipped |
-| agy | 1.4.0 | `agy models` lists **Gemini 4 Argon** (`gemini-4-argon-{high,medium,low}`, new) and Gemini 3.8 Flash (High/Medium/Low), plus Claude Opus/Sonnet 5.5 and `gpt-oss-120b-medium` display entries. 3.7/3.6 Flash and 3.1 Pro are gone. `--mode` is now `accept-edits`, `auto`, `plan`; `--effort` adds `xhigh` and `max`. New `--remote-control` flag plus `remote-control` and `mic-serve` subcommands (never use in consults). Reads hooks from `~/.gemini/config/hooks.json` (hcom + herdr, unchanged since 2026-09-23) |
+| claude | 2.1.301 | Nested `claude -p` blocked inside Claude Code. Consult model **`claude-opus-5-5[1m]`** is still the newest Opus (`opus` resolves to it; `claude-opus-6` is unrecognized). Fable is now `claude-fable-5-1`. `--safe-mode` drops CLAUDE.md, plugins, user skills, MCP, hooks and agents but keeps keychain auth; `--restricted` also drops Bash/WebFetch. `--bare` still skipped |
+| agy | 1.4.0 | `agy models` lists **Gemini 4 Argon** (`gemini-4-argon-{high,medium,low}`, new) and Gemini 3.8 Flash (High/Medium/Low), plus Claude Opus/Sonnet 5.5 and `gpt-oss-120b-medium` display entries. 3.7/3.6 Flash and 3.1 Pro are gone. `--mode` is now `accept-edits`, `auto`, `plan`; `--effort` enum adds `xhigh`/`max` (no Gemini model accepts them). New `--remote-control` flag plus `remote-control` and `mic-serve` subcommands (never use in consults). Reads hooks from `~/.gemini/config/hooks.json` (hcom + herdr, unchanged since 2026-09-23) |
 | codex | **0.160.0** | Model catalog: `gpt-6.1-sol` (priority 1, "latest workhorse"), `gpt-6-astra` (priority 2, "frontier intelligence"), `gpt-6-sol`, `gpt-6-luna`, `gpt-reserve`, `gpt-5.6-sol/terra/luna`, `codex-auto-review` (internal approval reviewer). `gpt-5.5` has left the catalog. Braintrust keeps Astra first because it is the strongest reasoner. Exec flags: `--strict-config`, `--thread-source`, `--enable/--disable <FEATURE>`, `-p/--profile` (layers `$CODEX_HOME/<name>.config.toml`), `--worktree`, `--approve-for-me`, `--dangerously-bypass-hook-trust`. Consults use none of the last three. `$CODEX_HOME/hooks.json` is honored, so the isolated home must not carry one |
 | cursor-agent | 2026.10.14 | `--list-models` tops out at `grok-4.7-{low,medium,high,xhigh}[-fast]` (no 4.8), plus `cursor-grok-4.6-*`/`4.5-*`. Also lists `gemini-4-argon-*`, `claude-fable-5-1-*`, `kimi-k3-*`, `glm-5.2-*`, `muse-*`. `--mode` choices: `plan`, `ask`. New: `-w/--worktree`, `--worktree-base`, `--skip-worktree-setup`, `--plan` (= `--mode plan`), `persist`/`worker`/`team`/`bedrock` subcommands. Still: `--sandbox`, `--plugin-dir`, `--auto-review`, `--add-dir`. Parameterized ids accept bracket overrides (`'model[effort=high]'`) |
 | grok | 1.0.46 | Not in active use; still logged out on 2026-10-16 (`Not signed in … grok login --device-code`), so `grok models` only shows `grok-4.6`/`grok-4.5`. All documented flags still in `--help`. Contract last dogfooded on 1.0.30 |
@@ -50,7 +50,7 @@ fi 2>/tmp/bt_agy.err | jq -r 'if .status=="SUCCESS" then .response else "AGY_FAI
 - No `@path` includes. Inline file content. Display names from `agy models` may include third-party brands (Claude, GPT-OSS); that is **not** an instruction to run the Gemini CLI or to route Claude through agy.
 - `--print-timeout` is unreliable as a hard bound; use external `timeout` or the PTY wrapper.
 - macOS: warm keychain before first call if OAuth re-prompts: `security find-generic-password -s "Antigravity Safe Storage" >/dev/null 2>&1 || true`
-- Optional: `--effort low|medium|high|xhigh|max` (the `-high` slug already bakes high in). Never `--remote-control` or `--mode auto` in a consult. `--json-schema` for structured answers. `--disable-slash-commands` for evals. `--sandbox` when the peer may run commands.
+- `--effort`: every Gemini model in agy tops out at `high`. A suffixed slug (`gemini-4-argon-high`) fixes the effort, so omit `--effort` or pass the matching value; any other value errors (`conflicts with --effort=max`). `xhigh`/`max` exist in the enum but are invalid for Gemini. Never `--remote-control` or `--mode auto` in a consult. `--json-schema` for structured answers. `--disable-slash-commands` for evals. `--sandbox` when the peer may run commands.
 
 ## Codex
 
@@ -164,11 +164,13 @@ opencode "${OC_ARGS[@]}" "$QUERY" 2>/tmp/bt_opencode.err \
 
 ```bash
 claude -p "$QUERY" --model "${bt_claude_model:-claude-opus-5-5[1m]}" --output-format json \
-  --no-session-persistence --settings '{"disableAllHooks":true}' 2>/tmp/bt_claude.err | jq -r '.result'
+  --no-session-persistence --safe-mode --settings '{"disableAllHooks":true}' 2>/tmp/bt_claude.err | jq -r '.result'
 ```
 
-- Consult default: **`claude-opus-5-5[1m]`** (Opus 5.5, 1M context). Bump when a newer Opus ships. `opus[1m]` is the alias form. Liveness probe uses haiku. Fable (`fable`) is opt-in for long-horizon work.
-- `--settings '{"disableAllHooks":true}'` keeps OAuth/keychain and skips user hooks (hcom). Verified 2026-10-07. Avoid `--bare` for consults (skips keychain; "Not logged in").
+- Consult default: **`claude-opus-5-5[1m]`** (Opus 5.5, 1M context). Bump when a newer Opus ships. `opus[1m]` is the alias form. Liveness probe uses haiku. Fable 5.1 (`claude-fable-5-1`) is opt-in for long-horizon work.
+- **`--safe-mode` is the isolation switch** (claude 2.1.301). It drops CLAUDE.md, plugins, user skills, MCP servers, hooks and agents, and keeps keychain auth and built-in tools. `--settings '{"disableAllHooks":true}'` stays as belt and braces. Dogfooded 2026-10-16: without `--safe-mode` the peer received the global CLAUDE.md, ~20 MCP servers (Gmail, Slack, Mercury…) and every plugin, about 62k cached tokens, 10s and $0.41 for a one-word answer. With it: ~15.6k tokens, 2.2s, $0.04, no hcom activity.
+- Strict text-only alternative: `--restricted --strict-mcp-config` (also removes Bash/WebFetch and ignores user/project settings files; ~13.9k tokens). Use it for Mode A consults.
+- Avoid `--bare` for consults (skips keychain; "Not logged in").
 - `--no-session-persistence` keeps consults out of `/resume`.
 - Piped stdin is capped at 10MB. Larger packages: write a file and name the path in the prompt.
 - Optional: `--effort high|xhigh|max`. `--json-schema` puts structured output on `.structured_output`. `modelUsage` in the JSON result confirms which model answered.
@@ -179,7 +181,7 @@ claude -p "$QUERY" --model "${bt_claude_model:-claude-opus-5-5[1m]}" --output-fo
 | You are in | Call peers via | Claude peer |
 |------------|----------------|-------------|
 | Claude Code | Bash / background shell | Task tool → `braintrust:peer` |
-| Codex | shell | `claude -p --model 'claude-opus-5-5[1m]' --settings '{"disableAllHooks":true}'` |
+| Codex | shell | `claude -p --model 'claude-opus-5-5[1m]' --safe-mode --settings '{"disableAllHooks":true}'` |
 | Cursor / Grok | shell | same |
 | OpenCode | shell (`opencode` host sits out of its own slot) | same |
 | agy | shell | same |

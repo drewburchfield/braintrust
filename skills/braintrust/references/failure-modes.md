@@ -11,7 +11,7 @@
 | Vision claims to text-only peers | Occasional | One Mode E peer; others get transcription + flag vision-dependent claims |
 | agy empty / hang (pre-1.1.0) | High historically | Probe bare first; PTY fallback; no gemini fallback |
 | Codex off-topic / memory contamination | Documented | Isolated `CODEX_HOME` + `--ignore-user-config` + `--ignore-rules` + scratch `-C` |
-| **Peer joins an agent bus (hcom) instead of answering** | Observed 2026-09-16 (grok) | Identity isolation on every CLI: `GROK_HOME`, `CODEX_HOME`, Cursor `--mode ask`, `--pure`, `braintrust:peer` / `disableAllHooks`. agy has hooks but no switch. See "Ambient hooks" below |
+| **Peer joins an agent bus (hcom) instead of answering** | Observed 2026-09-16 (grok) | Identity isolation on every CLI: `GROK_HOME`, `CODEX_HOME`, Cursor `--mode ask`, `--pure`, `braintrust:peer` / `--safe-mode`. agy has hooks but no switch. See "Ambient hooks" below |
 | Codex stdin hang | Common in harnesses | Always `< /dev/null` |
 | Codex timeout on binary-heavy tasks | Occasional | Pre-extract text artifacts; raise timeout only after context shrink |
 | Probe thrash (slow cold start marks CLI down) | Historical | Parallel probe, one warm retry, timeout = down without thrash |
@@ -25,7 +25,7 @@ The user's real homes carry SessionStart/PreToolUse hooks and plugins that talk 
 | grok | `~/.grok/hooks/hcom.json` (SessionStart) | `GROK_HOME=$bt_grok_home` (auth + minimal config, compat scanning off) + `--no-subagents` |
 | codex | `~/.codex/hooks.json` + `hcom_*` keys in `config.toml` | `CODEX_HOME=$bt_codex_home` (no `hooks.json`) + `--ignore-user-config --ignore-rules` |
 | opencode | `~/.config/opencode/opencode.json` → `plugins/hcom.ts` | `--pure` |
-| claude | `~/.claude/settings.json` hooks | `braintrust:peer` agent inside Claude Code; `--settings '{"disableAllHooks":true}'` for `claude -p` |
+| claude | `~/.claude/settings.json` hooks, global CLAUDE.md, MCP, plugins | `braintrust:peer` agent inside Claude Code; `--safe-mode --settings '{"disableAllHooks":true}'` for `claude -p` |
 | cursor | `~/.cursor/hooks.json` (cmux, hcom notice), user rules, `~/.cursor/plugins` | `--mode ask` (no shell) + `CMUX_CURSOR_HOOKS_DISABLED=1` + no `--approve-mcps`/`--plugin-dir`. hcom notice still reaches context; verified it does not change answers |
 | agy | `~/.gemini/config/hooks.json` (hcom lifecycle + tool hooks, herdr; since 2026-09-23) | No switch to skip them. Verified 2026-10-16 (agy 1.4.0): headless answers clean, no hcom/herdr text. Watch for bus chatter; skip the slot if it appears |
 
@@ -100,7 +100,8 @@ The probe builds both isolated homes under `$TMPDIR` on every run. Never point a
 | Nested session error | `claude -p` inside Claude Code | Task tool only |
 | Not logged in with `--bare` | Bare skips keychain | Drop `--bare` for consults (even when docs recommend it for CI) |
 | Consult landed on Sonnet / parent model | Task inherits parent unless an agent pins model | Use `subagent_type: "braintrust:peer"` (pins `claude-opus-5-5[1m]`) |
-| Hooks fired inside `claude -p` consult | User `settings.json` hooks | `--settings '{"disableAllHooks":true}'` (keeps OAuth) |
+| Hooks fired inside `claude -p` consult | User `settings.json` hooks | `--safe-mode` + `--settings '{"disableAllHooks":true}'` (keeps OAuth) |
+| `claude -p` consult slow, costly, or cites your CLAUDE.md / MCP tools | `disableAllHooks` alone still loads CLAUDE.md, every MCP server and plugin (~62k tokens, 4x latency, 10x cost on 2026-10-16) | Add `--safe-mode` (claude 2.1.301+) |
 
 ## Diagnostics (only when a consult fails)
 

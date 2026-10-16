@@ -75,7 +75,7 @@ Never: global `~/.codex` with memories + MCP for a "neutral peer." That is how o
 |------|-----|
 | File/repo walk | Task in the project (Claude Code) already has tools; **tell it the paths and the verification mandate** |
 | Vision | Attach/read image in Task prompt; other peers get transcription |
-| Headless from other hosts | `claude -p --model 'claude-opus-5-5[1m]' --settings '{"disableAllHooks":true}'` with enough inline context; avoid `--bare` (auth dies) |
+| Headless from other hosts | `claude -p --model 'claude-opus-5-5[1m]' --safe-mode --settings '{"disableAllHooks":true}'` with enough inline context; avoid `--bare` (auth dies) |
 | Inside Claude Code | Task tool `subagent_type: "braintrust:peer"` (Opus 5.5 1M, no CLAUDE.md, read-only) |
 | Nested | Never `claude -p` from inside Claude Code |
 

@@ -86,8 +86,9 @@ Treat local `--help` + dogfood as higher priority than blog posts.
 - [ ] Grok CLI (only if in use): default matches `Default model:` from an authenticated `grok models`
 - [ ] agy pin is the strongest `gemini-*-high` in `agy models` (`gemini-4-argon-high` as of 2026-10-16) and `bt_agy_fast_model` is the newest Flash High (`gemini-3.8-flash-high`). A new Gemini family name (not Flash) must still match the probe regex
 - [ ] agy and Cursor answers carry no hcom / agent-bus text (both load user hooks with no switch)
+- [ ] `claude -p --safe-mode` answers a "list your skills/plugins/MCP/CLAUDE.md" prompt with built-ins only
 - [ ] Claude consult model is `claude-opus-5-5[1m]` in `agents/peer.md` and the probe (haiku only for liveness); bump when a newer Opus ships
 - [ ] OpenCode model matches an authed provider (`opencode auth list`) and contains `glm-5.3` (`bt_opencode_variant=max`)
-- [ ] `--pure`, `GROK_HOME`, `CODEX_HOME`, Cursor `--mode ask`, and `disableAllHooks` still neutralize the hooks listed in `failure-modes.md`
+- [ ] `--pure`, `GROK_HOME`, `CODEX_HOME`, Cursor `--mode ask`, `--safe-mode` and `disableAllHooks` still neutralize the hooks listed in `failure-modes.md`
 - [ ] `git grep` for the previous model ids and CLI versions returns only CHANGELOG hits
 - [ ] Version bumped; session note saved under `.braintrust/sessions/`

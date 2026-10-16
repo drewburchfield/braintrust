@@ -20,7 +20,8 @@
 #                  no --approve-mcps + cmux hooks off (CMUX_CURSOR_HOOKS_DISABLED=1).
 #                  ~/.cursor/plugins may still load; never pass --plugin-dir.
 #      opencode -> --pure (skips config plugins, verified to drop hcom.ts)
-#      claude   -> Task tool inside Claude Code; else claude -p --settings '{"disableAllHooks":true}'
+#      claude   -> Task tool inside Claude Code; else claude -p --safe-mode (no CLAUDE.md/MCP/plugins/hooks,
+#                  keeps keychain auth) + --settings '{"disableAllHooks":true}'
 #      agy      -> plain --print. hcom/herdr hooks live in ~/.gemini/config/hooks.json (since
 #                  2026-09-23) and agy has no switch to skip them; verified 2026-10-16 (agy 1.4.0)
 #                  that headless answers stay clean and register no hcom agent.
@@ -437,10 +438,10 @@ probe_claude() {
     return
   fi
   local out
-  out=$(rt 45 claude -p "Reply with the single word: ok" --model haiku --output-format json --no-session-persistence --settings '{"disableAllHooks":true}' 2>/dev/null | jq -r '.result // empty' 2>/dev/null)
+  out=$(rt 45 claude -p "Reply with the single word: ok" --model haiku --output-format json --no-session-persistence --safe-mode --settings '{"disableAllHooks":true}' 2>/dev/null | jq -r '.result // empty' 2>/dev/null)
   if echo "$out" | grep -qi ok; then
     printf 'bt_claude_cli_available=true\nbt_claude_model=%s\n' "$cmodel" > "$D/claude.env"
-    echo "Claude CLI: available (haiku probe ok; consult model $cmodel; hooks disabled via --settings)" > "$D/claude.log"
+    echo "Claude CLI: available (haiku probe ok; consult model $cmodel; --safe-mode + hooks off)" > "$D/claude.log"
   else
     echo "Claude CLI: installed but not authenticated (claude /login) or nested" > "$D/claude.log"
   fi
@@ -450,7 +451,7 @@ probe_agy & probe_codex & probe_cursor & probe_grok & probe_opencode & probe_cla
 wait
 
 cat "$D"/agy.log "$D"/codex.log "$D"/cursor.log "$D"/grok.log "$D"/opencode.log "$D"/claude.log 2>/dev/null
-echo "Claude host path: Task tool (braintrust:peer agent) when inside Claude Code; claude -p --settings disableAllHooks otherwise"
+echo "Claude host path: Task tool (braintrust:peer agent) when inside Claude Code; claude -p --safe-mode otherwise"
 
 set -a
 # shellcheck disable=SC1090

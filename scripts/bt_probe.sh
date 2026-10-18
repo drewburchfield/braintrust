@@ -9,7 +9,7 @@
 #   # or, when skill is installed as a plugin:
 #   bash "${CLAUDE_PLUGIN_ROOT:-.}/scripts/bt_probe.sh"
 #
-# Design notes (2026-10-07 dogfood):
+# Design notes (2026-10-16 dogfood):
 #  * Gemini CLI is NOT probed. Google voice = agy only.
 #  * Every peer runs IDENTITY-ISOLATED. Ambient agent-bus hooks (hcom), MCP servers,
 #    memories and plugins in the user's real home hijack headless consults (a grok
@@ -20,12 +20,13 @@
 #                  no --approve-mcps + cmux hooks off (CMUX_CURSOR_HOOKS_DISABLED=1).
 #                  ~/.cursor/plugins may still load; never pass --plugin-dir.
 #      opencode -> --pure (skips config plugins, verified to drop hcom.ts)
-#      claude   -> Task tool inside Claude Code; else claude -p --settings '{"disableAllHooks":true}'
+#      claude   -> Task tool inside Claude Code; else claude -p --safe-mode (no CLAUDE.md/MCP/plugins/hooks,
+#                  keeps keychain auth) + --settings '{"disableAllHooks":true}'
 #      agy      -> plain --print. hcom/herdr hooks live in ~/.gemini/config/hooks.json (since
-#                  2026-09-23) and agy has no switch to skip them; verified 2026-10-07 that a
-#                  headless answer stays clean and registers no hcom agent.
+#                  2026-09-23) and agy has no switch to skip them; verified 2026-10-16 (agy 1.4.0)
+#                  that headless answers stay clean and register no hcom agent.
 #  * xAI slot: Cursor CLI (cursor-agent) first, Grok CLI second, one xAI voice per consult.
-#    Cursor pins the newest `grok-X.Y-high` it lists (grok-4.7-high as of 2026-10-07).
+#    Cursor pins the newest `grok-X.Y-high` it lists (grok-4.7-high as of 2026-10-16).
 #    Cursor has no flag to skip ~/.cursor/hooks.json or user rules, so the hcom notice
 #    line and rules still reach context; ask mode keeps them from turning into actions.
 #  * Grok CLI default comes from `grok models` ("Default model:"); fallback grok-4.7.
@@ -35,8 +36,9 @@
 #  * OpenCode uses the user's configured/default model (opencode.json "model",
 #    else last non-free session model). Expected id contains glm-5.3 (zai-coding-plan/glm-5.3);
 #    the probe warns when it does not. If the resolved id contains glm-5.3, bt_opencode_variant=max.
-#  * agy Google pin is the newest `gemini-*-flash-high` slug `agy models` lists
-#    (gemini-3.8-flash-high as of 2026-10-07).
+#  * agy Google pin is the strongest `gemini-*-high` slug `agy models` lists (newest generation,
+#    non-Flash wins a tie): gemini-4-argon-high as of 2026-10-16. The newest
+#    `gemini-*-flash-high` (gemini-3.8-flash-high) is bt_agy_fast_model and the fallback pin.
 #  * Claude consult default is claude-opus-5-5[1m] (Opus 5.5, 1M context). Liveness probe uses haiku.
 #  * agy 1.1.0+ works bare-piped; PTY wrapper is a durable fallback.
 
@@ -147,22 +149,20 @@ fi
 security find-generic-password -s "Antigravity Safe Storage" >/dev/null 2>&1 || true
 
 # --- Antigravity (agy) - ONLY Google path ---
-# Pin the newest Gemini Flash (High) slug the account lists (gemini-3.8-flash-high as of
-# 2026-10). Parse --output-format json (.status / .response). Text + PTY remain fallbacks.
-resolve_agy_model() {
-  local listing="$1"
-  printf '%s\n' "$listing" \
-    | grep -oE '^gemini-[0-9]+\.[0-9]+-flash-high' \
-    | awk -F'[-.]' '{print $2, $3, $0}' \
-    | sort -k1,1n -k2,2n \
-    | tail -1 | awk '{print $3}'
+# Pin the strongest Gemini "High" slug the account lists: newest generation first, and on a
+# tie a non-Flash family wins (gemini-4-argon-high as of 2026-10-16). The newest
+# gemini-*-flash-high (gemini-3.8-flash-high) is the fast fallback when the pin fails.
+# Parse --output-format json (.status / .response). Text + PTY remain fallbacks.
+_agy_rank() {
+  grep -oE '^gemini-[0-9]+(\.[0-9]+)?-[a-z]+-high' \
+    | awk '{n=split($0,p,"-"); split(p[2],v,"."); mi=(v[2]==""?0:v[2]); fl=(p[3]=="flash")?0:1; print v[1], mi, fl, $0}' \
+    | sort -k1,1n -k2,2n -k3,3n | tail -1 | awk '{print $4}'
 }
-probe_agy() {
-  printf 'bt_agy_available=false\nbt_agy_needs_pty=false\nbt_agy_model=\n' > "$D/agy.env"
-  command -v agy &>/dev/null || { echo "Antigravity (agy): not installed" > "$D/agy.log"; return; }
-  local model="" listing out rc needs_pty=false response=""
-  listing=$(rt 30 agy models 2>/dev/null) || true
-  model=$(resolve_agy_model "$listing")
+resolve_agy_model() { printf '%s\n' "$1" | _agy_rank; }
+resolve_agy_fast_model() { printf '%s\n' "$1" | grep -E '^gemini-[0-9]+(\.[0-9]+)?-flash-high' | _agy_rank; }
+agy_ok() {  # agy_ok <model>: one-word liveness; sets agy_needs_pty
+  local model="$1" out rc response=""
+  agy_needs_pty=false
   local args=(agy --print "Reply with the single word: ok" --dangerously-skip-permissions --output-format json)
   [ -n "$model" ] && args+=(--model "$model")
   out=$(rt 45 "${args[@]}" 2>/dev/null); rc=$?
@@ -175,19 +175,31 @@ probe_agy() {
   fi
   if ! echo "$response" | grep -qi ok; then
     if [ "$rc" = "124" ] || [ -z "$response" ]; then
-      args=(agy --print "Reply with the single word: ok" --dangerously-skip-permissions)
-      [ -n "$model" ] && args+=(--model "$model")
-      out=$(python3 /tmp/bt_agy_pty.py 60 "${args[@]}" 2>/dev/null | head -5); rc=$?
-      needs_pty=true
+      out=$(python3 /tmp/bt_agy_pty.py 60 "${args[@]}" 2>/dev/null | head -5)
+      agy_needs_pty=true
       response=$out
     fi
   fi
-  if echo "$response" | grep -qi ok; then
-    printf 'bt_agy_available=true\nbt_agy_needs_pty=%s\nbt_agy_model=%s\n' "$needs_pty" "$model" > "$D/agy.env"
-    echo "Antigravity (agy): available [Google AI only; pty=$needs_pty; model=${model:-account-tier}]" > "$D/agy.log"
+  echo "$response" | grep -qi ok
+}
+probe_agy() {
+  printf 'bt_agy_available=false\nbt_agy_needs_pty=false\nbt_agy_model=\nbt_agy_fast_model=\n' > "$D/agy.env"
+  command -v agy &>/dev/null || { echo "Antigravity (agy): not installed" > "$D/agy.log"; return; }
+  local listing model fast picked=""
+  agy_needs_pty=false
+  listing=$(rt 30 agy models 2>/dev/null) || true
+  model=$(resolve_agy_model "$listing")
+  fast=$(resolve_agy_fast_model "$listing")
+  if agy_ok "$model"; then
+    picked="$model"
+  elif [ -n "$fast" ] && [ "$fast" != "$model" ] && agy_ok "$fast"; then
+    picked="$fast"
   else
     echo "Antigravity (agy): empty/timeout (auth or quota)" > "$D/agy.log"
+    return
   fi
+  printf 'bt_agy_available=true\nbt_agy_needs_pty=%s\nbt_agy_model=%s\nbt_agy_fast_model=%s\n' "$agy_needs_pty" "$picked" "$fast" > "$D/agy.env"
+  echo "Antigravity (agy): available [Google AI only; pty=$agy_needs_pty; model=${picked:-account-tier}; fast=${fast:-none}]" > "$D/agy.log"
 }
 
 # --- Codex (isolated clean-slate + ignore-user-config; primary model gpt-6-astra) ---
@@ -239,7 +251,7 @@ probe_codex() {
 }
 
 # --- Grok (Grok Build; xAI fallback only; advertised default from `grok models`, fallback grok-4.7) ---
-# Unverified since grok 1.0.30: not in active use as of 2026-10-07 (Cursor fills the xAI slot).
+# Unverified since grok 1.0.30: not in active use as of 2026-10-16 (Cursor fills the xAI slot).
 resolve_grok_model() {
   local listing default cand
   listing=$(rt 30 env GROK_HOME="$bt_grok_home" GROK_DISABLE_AUTOUPDATER=1 grok models 2>/dev/null) || true
@@ -427,10 +439,10 @@ probe_claude() {
     return
   fi
   local out
-  out=$(rt 45 claude -p "Reply with the single word: ok" --model haiku --output-format json --no-session-persistence --settings '{"disableAllHooks":true}' 2>/dev/null | jq -r '.result // empty' 2>/dev/null)
+  out=$(rt 45 claude -p "Reply with the single word: ok" --model haiku --output-format json --no-session-persistence --safe-mode --settings '{"disableAllHooks":true}' 2>/dev/null | jq -r '.result // empty' 2>/dev/null)
   if echo "$out" | grep -qi ok; then
     printf 'bt_claude_cli_available=true\nbt_claude_model=%s\n' "$cmodel" > "$D/claude.env"
-    echo "Claude CLI: available (haiku probe ok; consult model $cmodel; hooks disabled via --settings)" > "$D/claude.log"
+    echo "Claude CLI: available (haiku probe ok; consult model $cmodel; --safe-mode + hooks off)" > "$D/claude.log"
   else
     echo "Claude CLI: installed but not authenticated (claude /login) or nested" > "$D/claude.log"
   fi
@@ -440,7 +452,7 @@ probe_agy & probe_codex & probe_cursor & probe_grok & probe_opencode & probe_cla
 wait
 
 cat "$D"/agy.log "$D"/codex.log "$D"/cursor.log "$D"/grok.log "$D"/opencode.log "$D"/claude.log 2>/dev/null
-echo "Claude host path: Task tool (braintrust:peer agent) when inside Claude Code; claude -p --settings disableAllHooks otherwise"
+echo "Claude host path: Task tool (braintrust:peer agent) when inside Claude Code; claude -p --safe-mode otherwise"
 
 set -a
 # shellcheck disable=SC1090
@@ -462,6 +474,7 @@ cat > /tmp/bt_models.env << EOF
 bt_agy_available=${bt_agy_available:-false}
 bt_agy_needs_pty=${bt_agy_needs_pty:-false}
 bt_agy_model=${bt_agy_model:-}
+bt_agy_fast_model=${bt_agy_fast_model:-}
 bt_codex_available=${bt_codex_available:-false}
 bt_codex_home=${bt_codex_home:-${TMPDIR:-/tmp}/bt-codex-home}
 bt_codex_model=${bt_codex_model-gpt-6-astra}
@@ -479,7 +492,7 @@ bt_opencode_variant=${bt_opencode_variant:-}
 bt_claude_cli_available=${bt_claude_cli_available:-false}
 bt_claude_model="${bt_claude_model:-claude-opus-5-5[1m]}"
 bt_probe_ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-bt_probe_version=1.14.0
+bt_probe_version=1.15.0
 EOF
 
 rm -rf "$D"

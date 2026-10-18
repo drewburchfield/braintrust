@@ -75,7 +75,7 @@ Never: global `~/.codex` with memories + MCP for a "neutral peer." That is how o
 |------|-----|
 | File/repo walk | Task in the project (Claude Code) already has tools; **tell it the paths and the verification mandate** |
 | Vision | Attach/read image in Task prompt; other peers get transcription |
-| Headless from other hosts | `claude -p --model 'claude-opus-5-5[1m]' --settings '{"disableAllHooks":true}'` with enough inline context; avoid `--bare` (auth dies) |
+| Headless from other hosts | `claude -p --model 'claude-opus-5-5[1m]' --safe-mode --settings '{"disableAllHooks":true}'` with enough inline context; avoid `--bare` (auth dies) |
 | Inside Claude Code | Task tool `subagent_type: "braintrust:peer"` (Opus 5.5 1M, no CLAUDE.md, read-only) |
 | Nested | Never `claude -p` from inside Claude Code |
 
@@ -87,7 +87,7 @@ Claude is usually your **best file-capable verifier** when the host is Claude Co
 |------|-----|
 | Headless answer | `--print` + `--output-format json` + `--dangerously-skip-permissions`; parse `.response` |
 | Extra roots | `--add-dir` (repeatable) when files live outside cwd |
-| Model pin | `--model "$bt_agy_model"` (newest `gemini-*-flash-high`; `gemini-3.8-flash-high` as of 2026-10-07). Slugs from `agy models` |
+| Model pin | `--model "$bt_agy_model"` (strongest `gemini-*-high`; `gemini-4-argon-high` as of 2026-10-16, fast `$bt_agy_fast_model`). Slugs from `agy models` |
 | No `@path` | **Inline** or ensure cwd/`--add-dir` and tell it relative paths |
 | Artifacts | It may write under its brain dir; host should copy useful drafts back into the repo |
 | Identity | No isolation switch. `~/.gemini/config/hooks.json` (hcom, herdr) loads on every run; keep packages self-contained and watch for bus chatter |

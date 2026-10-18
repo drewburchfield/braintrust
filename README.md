@@ -18,19 +18,19 @@ Delegates a task to peer AI CLIs in parallel. Second opinions on architecture, r
 - 6-step protocol: restatement, assumptions, evidence, fidelity, honesty, GROUNDED / NOT GROUNDED
 - Host actively curates context before delegating (not "whatever is in the chat")
 
-## Members (v1.14)
+## Members (v1.15)
 
 | Slot | CLI | Notes |
 |------|-----|-------|
-| Anthropic | Claude | `braintrust:peer` agent (Opus 5.5, 1M) inside Claude Code; `claude -p --model 'claude-opus-5-5[1m]' --settings '{"disableAllHooks":true}'` from other hosts |
-| Google | **agy only** | No Gemini CLI. Newest Flash High from `agy models` (**`gemini-3.8-flash-high`** as of 2026-10); `--output-format json`. Loads user hooks (no switch) |
+| Anthropic | Claude | `braintrust:peer` agent (Opus 5.5, 1M) inside Claude Code; `claude -p --model 'claude-opus-5-5[1m]' --safe-mode --settings '{"disableAllHooks":true}'` from other hosts |
+| Google | **agy only** | No Gemini CLI. Strongest Gemini High from `agy models` (**`gemini-4-argon-high`** as of 2026-10), falling back to the newest Flash High (`gemini-3.8-flash-high`); `--output-format json`. Loads user hooks (no switch) |
 | OpenAI | Codex | **`gpt-6-astra`** (GPT-6 Astra; fallback `gpt-6.1-sol`); isolated `CODEX_HOME` + `--ignore-user-config --ignore-rules`; CLI **0.160.0** verified |
 | xAI | Cursor CLI, else Grok CLI | Cursor: newest `grok-X.Y-high` (`grok-4.7-high` today), `--mode ask`. Grok CLI (optional fallback): `grok models` default, isolated `GROK_HOME` |
 | Multi | OpenCode | User's configured/default model (expected `zai-coding-plan/glm-5.3`); `--variant max` for GLM-5.3; `--pure` |
 
 Up to **five** independent voices when everything is installed and authenticated. Availability is decided by `scripts/bt_probe.sh`, not by preference.
 
-Every peer runs **identity-isolated**. The probe builds `$TMPDIR/bt-codex-home` and `$TMPDIR/bt-grok-home` (auth only), Cursor runs read-only (`--mode ask`, cmux hooks off, no MCP approval), OpenCode runs `--pure`, and the Claude peer skips CLAUDE.md and user hooks. Ambient agent-bus hooks (hcom) in the real homes otherwise hijack headless answers. agy has no isolation switch for its hooks; braintrust watches its answers for bus chatter.
+Every peer runs **identity-isolated**. The probe builds `$TMPDIR/bt-codex-home` and `$TMPDIR/bt-grok-home` (auth only), Cursor runs read-only (`--mode ask`, cmux hooks off, no MCP approval), OpenCode runs `--pure`, and the Claude peer skips CLAUDE.md and user hooks. The `claude -p` path runs `--safe-mode`, so it gets no CLAUDE.md, MCP servers or plugins. Ambient agent-bus hooks (hcom) in the real homes otherwise hijack headless answers. agy has no isolation switch for its hooks; braintrust watches its answers for bus chatter.
 
 ## Commands
 
@@ -39,6 +39,13 @@ Every peer runs **identity-isolated**. The probe builds `$TMPDIR/bt-codex-home` 
 | `/braintrust` | Orchestrate a task across peer CLIs |
 | `/consult` | Alias for `/braintrust` |
 | `braintrust:peer` agent | Claude peer voice (Opus 5.5 1M, read-only) used by the Task tool |
+
+## v1.15.0 Highlights
+
+- **Google → Gemini 4 Argon High** (`gemini-4-argon-high`). The probe now pins the strongest `gemini-*-high` slug and falls back to the newest Flash High (`bt_agy_fast_model`). Argon is ~2.5x slower than Flash High.
+- **Claude `claude -p` peer runs `--safe-mode`.** Hooks were already off, but the peer still loaded your CLAUDE.md, ~20 MCP servers and every plugin. Safe mode keeps keychain auth and cuts a one-word consult from ~62k tokens, 10s and $0.41 to ~15.6k tokens, 2.2s and $0.04.
+- **Harness refresh** dogfooded 2026-10-16: claude 2.1.301, agy 1.4.0, codex 0.160.0, cursor-agent 2026.10.14, opencode 1.18.34. Pins unchanged elsewhere: `gpt-6-astra`, `claude-opus-5-5[1m]`, `grok-4.7-high`, `glm-5.3`.
+- New "never pass" flags documented (agy `--remote-control`, Codex `--dangerously-bypass-hook-trust`/`--approve-for-me`/`-p`, Cursor `--worktree`/`--plan`) plus agy's Gemini effort ceiling and OpenCode's `glm-5.3-highspeed` 429 retry loop.
 
 ## v1.14.0 Highlights
 

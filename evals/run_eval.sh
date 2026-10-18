@@ -162,7 +162,7 @@ run_peer() {
         echo "SKIPPED unavailable" >"$outdir/result.txt"; return
       fi
       timeout 150 claude -p "$q" --model "${bt_claude_model:-claude-opus-5-5[1m]}" --output-format json \
-        --no-session-persistence --settings '{"disableAllHooks":true}' \
+        --no-session-persistence --safe-mode --settings '{"disableAllHooks":true}' \
         2>"$outdir/stderr.txt" \
         | jq -r '.result // empty' >"$outdir/result.txt" || true
       ;;

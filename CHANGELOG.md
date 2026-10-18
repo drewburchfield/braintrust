@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.15.0 — 2026-10-16
+
+Harness + model refresh. Dogfooded against claude 2.1.301, agy 1.4.0, codex 0.160.0, cursor-agent 2026.10.14, opencode 1.18.34 (grok 1.0.46 still logged out). Every documented flag re-checked against `--help`; none removed or renamed.
+
+- Google pin moves to **Gemini 4 Argon High** (`gemini-4-argon-high`). The probe picks the strongest `gemini-*-high` slug (newest generation, non-Flash wins a tie) and falls back to the newest Flash High, now exported as `bt_agy_fast_model` (`gemini-3.8-flash-high`). Argon took ~7s of agy time vs ~3-5s for Flash High. agy 1.4.0 dropped 3.7/3.6 Flash and 3.1 Pro.
+- `claude -p` consults add **`--safe-mode`** (keeps keychain auth; drops CLAUDE.md, plugins, user skills, MCP, hooks, agents). `disableAllHooks` alone still loaded the global CLAUDE.md, ~20 MCP servers and every plugin: 62k cached tokens, 10.4s, $0.41 for a one-word answer vs 15.6k, 2.2s, $0.04 with safe mode. `--restricted --strict-mcp-config` documented as the strict text-only option. Probe liveness uses the same flags.
+- agy: `--mode auto`, `--remote-control`, `remote-control`/`mic-serve` noted (never in consults). `--effort` enum lists `xhigh`/`max`, but every Gemini model tops out at `high` and a suffixed slug rejects any non-matching effort.
+- Codex: `gpt-5.5` left the catalog. Documented `-p/--profile`, `--worktree`, `--approve-for-me`, `--dangerously-bypass-hook-trust` as never-pass flags (a profile layers config back in).
+- Cursor: 2026.10.14 adds `--worktree`, `--plan`, `persist`/`worker`/`team`/`bedrock`; `grok-4.7-high` is still the newest Grok. Never pass `--worktree` or `--plan`.
+- OpenCode: new failure row for `glm-5.3-highspeed` (not on the Coding Plan; retryable 429 loops ~80s).
+- Claude: Opus 5.5 is still newest (`claude-opus-6` unrecognized). Fable reference is now `claude-fable-5-1`.
+- Dogfood 2026-10-16 (one-word headless, current contracts): codex/gpt-6-astra 4.6s, agy/gemini-3.8-flash-high 5.5s, agy/gemini-4-argon-high 10.4s, claude/opus-5.5 5.5s (2.2s with `--safe-mode`), opencode/glm-5.3 9.3s, cursor/grok-4.7-high 14.3s, all pass with no hcom text; grok fails "Not signed in".
+- Evals: contract-quiz 2026-10-18 on skill-current: agy (Argon High), codex, cursor (grok-4.7-high), opencode all 10/10.
+
 ## 1.14.0 — 2026-10-07
 
 Harness refresh and doc catch-up. Dogfooded against claude 2.1.292, agy 1.3.1 (gemini-3.8-flash-high), codex 0.160.0 (gpt-6-astra), cursor-agent 2026.10.01 (grok-4.7-high), opencode 1.18.34 (glm-5.3). Every documented flag re-checked against `--help`.

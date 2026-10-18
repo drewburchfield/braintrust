@@ -11,7 +11,7 @@
 | Vision claims to text-only peers | Occasional | One Mode E peer; others get transcription + flag vision-dependent claims |
 | agy empty / hang (pre-1.1.0) | High historically | Probe bare first; PTY fallback; no gemini fallback |
 | Codex off-topic / memory contamination | Documented | Isolated `CODEX_HOME` + `--ignore-user-config` + `--ignore-rules` + scratch `-C` |
-| **Peer joins an agent bus (hcom) instead of answering** | Observed 2026-09-16 (grok) | Identity isolation on every CLI: `GROK_HOME`, `CODEX_HOME`, Cursor `--mode ask`, `--pure`, `braintrust:peer` / `disableAllHooks`. agy has hooks but no switch. See "Ambient hooks" below |
+| **Peer joins an agent bus (hcom) instead of answering** | Observed 2026-09-16 (grok) | Identity isolation on every CLI: `GROK_HOME`, `CODEX_HOME`, Cursor `--mode ask`, `--pure`, `braintrust:peer` / `--safe-mode`. agy has hooks but no switch. See "Ambient hooks" below |
 | Codex stdin hang | Common in harnesses | Always `< /dev/null` |
 | Codex timeout on binary-heavy tasks | Occasional | Pre-extract text artifacts; raise timeout only after context shrink |
 | Probe thrash (slow cold start marks CLI down) | Historical | Parallel probe, one warm retry, timeout = down without thrash |
@@ -25,9 +25,9 @@ The user's real homes carry SessionStart/PreToolUse hooks and plugins that talk 
 | grok | `~/.grok/hooks/hcom.json` (SessionStart) | `GROK_HOME=$bt_grok_home` (auth + minimal config, compat scanning off) + `--no-subagents` |
 | codex | `~/.codex/hooks.json` + `hcom_*` keys in `config.toml` | `CODEX_HOME=$bt_codex_home` (no `hooks.json`) + `--ignore-user-config --ignore-rules` |
 | opencode | `~/.config/opencode/opencode.json` → `plugins/hcom.ts` | `--pure` |
-| claude | `~/.claude/settings.json` hooks | `braintrust:peer` agent inside Claude Code; `--settings '{"disableAllHooks":true}'` for `claude -p` |
+| claude | `~/.claude/settings.json` hooks, global CLAUDE.md, MCP, plugins | `braintrust:peer` agent inside Claude Code; `--safe-mode --settings '{"disableAllHooks":true}'` for `claude -p` |
 | cursor | `~/.cursor/hooks.json` (cmux, hcom notice), user rules, `~/.cursor/plugins` | `--mode ask` (no shell) + `CMUX_CURSOR_HOOKS_DISABLED=1` + no `--approve-mcps`/`--plugin-dir`. hcom notice still reaches context; verified it does not change answers |
-| agy | `~/.gemini/config/hooks.json` (hcom lifecycle + tool hooks, herdr; since 2026-09-23) | No switch to skip them. Verified 2026-10-07: headless answer clean, no hcom agent registered. Watch for bus chatter; skip the slot if it appears |
+| agy | `~/.gemini/config/hooks.json` (hcom lifecycle + tool hooks, herdr; since 2026-09-23) | No switch to skip them. Verified 2026-10-16 (agy 1.4.0): headless answers clean, no hcom/herdr text. Watch for bus chatter; skip the slot if it appears |
 
 The probe builds both isolated homes under `$TMPDIR` on every run. Never point a consult at `~/.grok` or `~/.codex`.
 
@@ -41,7 +41,8 @@ The probe builds both isolated homes under `$TMPDIR` on every run. Never point a
 | OAuth re-prompt macOS | keyringAuth 1s timeout (#51) | Keychain warm-up before call |
 | Empty after success previously | Quota (#56) | Stop calling agy this session; note gap |
 | Exit 0 with empty stdout | Dropped agent stream (fixed in 1.1.18) | Treat empty as failure; prefer `--output-format json` and check `.status` |
-| Pinned slug 404 | Older Flash generation retired | Probe picks the newest `gemini-*-flash-high` from `agy models`; re-run probe |
+| Pinned slug 404 | Older generation retired (3.7/3.6 Flash and 3.1 Pro left in agy 1.4.0) | Probe picks the strongest `gemini-*-high` from `agy models` and falls back to the newest Flash High; re-run probe |
+| Google slot slow on big packages | Argon High is ~2.5x slower than Flash High | Use `$bt_agy_fast_model` for quick checks; keep Argon for the real consult |
 | Answer mentions hcom / agent bus | `~/.gemini/config/hooks.json` hcom hooks fired | No isolation switch exists. Skip the Google slot and note it; do not edit the user's hooks from a consult |
 
 ### Codex
@@ -89,6 +90,7 @@ The probe builds both isolated homes under `$TMPDIR` on every run. Never point a
 | Wrong/weak free model on headless | `run` without config `model` often picks openrouter `:free` | Set `"model"` in `~/.config/opencode/opencode.json`; probe uses last non-free session as fallback |
 | Empty text events | Auth / provider down | `opencode auth list`; retry once |
 | Plugin chatter in answer | Ran without `--pure` | Always `--pure`; probe log says "--pure drops config plugins" |
+| `glm-5.3-highspeed` hangs ~80s then 429 "subscription plan does not yet include access" | Not on the Z.AI Coding Plan; error is marked retryable so OpenCode keeps retrying | Do not select highspeed; stay on `glm-5.3`. Always wrap in `timeout` |
 | Resolved model is not glm-5.3 | Config `model` changed | Set `"model": "zai-coding-plan/glm-5.3"` in `~/.config/opencode/opencode.json`; probe warns |
 
 ### Claude
@@ -98,7 +100,8 @@ The probe builds both isolated homes under `$TMPDIR` on every run. Never point a
 | Nested session error | `claude -p` inside Claude Code | Task tool only |
 | Not logged in with `--bare` | Bare skips keychain | Drop `--bare` for consults (even when docs recommend it for CI) |
 | Consult landed on Sonnet / parent model | Task inherits parent unless an agent pins model | Use `subagent_type: "braintrust:peer"` (pins `claude-opus-5-5[1m]`) |
-| Hooks fired inside `claude -p` consult | User `settings.json` hooks | `--settings '{"disableAllHooks":true}'` (keeps OAuth) |
+| Hooks fired inside `claude -p` consult | User `settings.json` hooks | `--safe-mode` + `--settings '{"disableAllHooks":true}'` (keeps OAuth) |
+| `claude -p` consult slow, costly, or cites your CLAUDE.md / MCP tools | `disableAllHooks` alone still loads CLAUDE.md, every MCP server and plugin (~62k tokens, 4x latency, 10x cost on 2026-10-16) | Add `--safe-mode` (claude 2.1.301+) |
 
 ## Diagnostics (only when a consult fails)
 

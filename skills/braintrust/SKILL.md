@@ -1,7 +1,7 @@
 ---
 name: braintrust
 description: Orchestrate other AI CLIs (Antigravity/agy, Codex, Cursor CLI or Grok for xAI, OpenCode, Claude Code) for second opinions, research, codebase analysis, design review, security audits, and parallel research. No Gemini CLI.
-version: 1.15.0
+version: 1.15.1
 ---
 
 # Braintrust
@@ -42,7 +42,7 @@ Every peer runs from a clean profile. Ambient hooks (agent buses like hcom), MCP
 | Grok | `GROK_HOME=$bt_grok_home` (auth only; compat scanning off) + `GROK_DISABLE_AUTOUPDATER=1` + `--no-subagents` |
 | OpenCode | `--pure` (drops config plugins) |
 | Claude | `braintrust:peer` agent (`omitClaudeMd`, read-only); other hosts add `--safe-mode` (drops CLAUDE.md, plugins, MCP, hooks; keeps auth) + `--settings '{"disableAllHooks":true}'` |
-| agy | Plain `--print`. hcom and herdr hooks live in `~/.gemini/config/hooks.json` and agy has no switch to skip them. Verified 2026-10-16 (agy 1.4.0): headless answers stay clean. If an answer mentions hcom or an agent bus, skip the Google slot |
+| agy | Plain `--print`. hcom and herdr hooks live in `~/.gemini/config/hooks.json` and agy has no switch to skip them. Verified 2026-10-23 (agy 1.4.6): headless answers stay clean. If an answer mentions hcom or an agent bus, skip the Google slot |
 
 The probe creates the Codex and Grok homes. `-C` / `--cwd` / `--workspace` alone is **not** isolation.
 

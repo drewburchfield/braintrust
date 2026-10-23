@@ -23,7 +23,7 @@
 #      claude   -> Task tool inside Claude Code; else claude -p --safe-mode (no CLAUDE.md/MCP/plugins/hooks,
 #                  keeps keychain auth) + --settings '{"disableAllHooks":true}'
 #      agy      -> plain --print. hcom/herdr hooks live in ~/.gemini/config/hooks.json (since
-#                  2026-09-23) and agy has no switch to skip them; verified 2026-10-16 (agy 1.4.0)
+#                  2026-09-23) and agy has no switch to skip them; verified 2026-10-23 (agy 1.4.6)
 #                  that headless answers stay clean and register no hcom agent.
 #  * xAI slot: Cursor CLI (cursor-agent) first, Grok CLI second, one xAI voice per consult.
 #    Cursor pins the newest `grok-X.Y-high` it lists (grok-4.7-high as of 2026-10-16).
@@ -492,7 +492,7 @@ bt_opencode_variant=${bt_opencode_variant:-}
 bt_claude_cli_available=${bt_claude_cli_available:-false}
 bt_claude_model="${bt_claude_model:-claude-opus-5-5[1m]}"
 bt_probe_ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-bt_probe_version=1.15.0
+bt_probe_version=1.15.1
 EOF
 
 rm -rf "$D"

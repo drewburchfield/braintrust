@@ -27,7 +27,7 @@ The user's real homes carry SessionStart/PreToolUse hooks and plugins that talk 
 | opencode | `~/.config/opencode/opencode.json` → `plugins/hcom.ts` | `--pure` |
 | claude | `~/.claude/settings.json` hooks, global CLAUDE.md, MCP, plugins | `braintrust:peer` agent inside Claude Code; `--safe-mode --settings '{"disableAllHooks":true}'` for `claude -p` |
 | cursor | `~/.cursor/hooks.json` (cmux, hcom notice), user rules, `~/.cursor/plugins` | `--mode ask` (no shell) + `CMUX_CURSOR_HOOKS_DISABLED=1` + no `--approve-mcps`/`--plugin-dir`. hcom notice still reaches context; verified it does not change answers |
-| agy | `~/.gemini/config/hooks.json` (hcom lifecycle + tool hooks, herdr; since 2026-09-23) | No switch to skip them. Verified 2026-10-16 (agy 1.4.0): headless answers clean, no hcom/herdr text. Watch for bus chatter; skip the slot if it appears |
+| agy | `~/.gemini/config/hooks.json` (hcom lifecycle + tool hooks, herdr; since 2026-09-23) | No switch to skip them. Verified 2026-10-23 (agy 1.4.6): headless answers clean, no hcom/herdr text. Watch for bus chatter; skip the slot if it appears |
 
 The probe builds both isolated homes under `$TMPDIR` on every run. Never point a consult at `~/.grok` or `~/.codex`.
 

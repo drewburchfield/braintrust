@@ -40,6 +40,10 @@ Every peer runs **identity-isolated**. The probe builds `$TMPDIR/bt-codex-home` 
 | `/consult` | Alias for `/braintrust` |
 | `braintrust:peer` agent | Claude peer voice (Opus 5.5 1M, read-only) used by the Task tool |
 
+## v1.15.1 Highlights
+
+- **Harness refresh** dogfooded 2026-10-23: claude 2.1.309, agy 1.4.6, codex 0.160.1, cursor-agent 2026.10.22, opencode 1.18.34. Every pin holds; Gemini 4 Argon is still Google's newest model.
+
 ## v1.15.0 Highlights
 
 - **Google → Gemini 4 Argon High** (`gemini-4-argon-high`). The probe now pins the strongest `gemini-*-high` slug and falls back to the newest Flash High (`bt_agy_fast_model`). Argon is ~2.5x slower than Flash High.

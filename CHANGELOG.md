@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.15.1 — 2026-10-23
+
+Doc-only harness refresh. Dogfooded against claude 2.1.309, agy 1.4.6 (gemini-4-argon-high), codex 0.160.1 (gpt-6-astra), cursor-agent 2026.10.22 (grok-4.7-high), opencode 1.18.34 (glm-5.3). Every documented flag is still in `--help`; every pin holds.
+
+- Google: `agy models` and the Gemini API release feed still top out at Gemini 4 Argon (GA 2026-10-13). No newer OpenAI, xAI or Z.ai model in any catalog (no grok-4.8, no GLM-5.4).
+- `cli-contracts.md` version table updated. Cursor catalog note fixed (`kimi-k2.7-code`, not `kimi-k3-*`; `cursor-grok-4.5` is high-only). Codex notes that upstream 0.161.0 defaults to `gpt-6.1-sol`; consults pass `-m`, so Astra stays the pin. agy 1.4.6 sandbox blocks `~/.docker`, `~/.kube`, `~/_netrc`.
+- New claude flags recorded but not adopted: `--permission-prompts`, `--setting-sources`, `--exclude-dynamic-system-prompt-sections`; `--bg`/`--cloud`/`--desktop` are never-pass.
+- agy hook check re-verified on 1.4.6: headless answers clean, no hcom/herdr text. Grok CLI still signed out (unchanged).
+- Eval 2026-10-23: contract-quiz on skill-current, agy (gemini-4-argon-high), codex (gpt-6-astra), cursor (grok-4.7-high), opencode (glm-5.3) all 10/10.
+
 ## 1.15.0 — 2026-10-16
 
 Harness + model refresh. Dogfooded against claude 2.1.301, agy 1.4.0, codex 0.160.0, cursor-agent 2026.10.14, opencode 1.18.34 (grok 1.0.46 still logged out). Every documented flag re-checked against `--help`; none removed or renamed.

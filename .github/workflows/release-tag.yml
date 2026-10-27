@@ -1,0 +1,37 @@
+name: Release tag
+
+# Tags each release commit as v<version> from .claude-plugin/plugin.json,
+# so the marketplace pin resolves without a manual tag push.
+on:
+  push:
+    branches: [main]
+    paths: [.claude-plugin/plugin.json]
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: Commit to tag (defaults to the head of main)
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  tag:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.sha || github.sha }}
+          fetch-depth: 0
+      - name: Create v<version> if missing
+        run: |
+          version="$(jq -r .version .claude-plugin/plugin.json)"
+          tag="v${version}"
+          sha="$(git rev-parse HEAD)"
+          if git ls-remote --exit-code --tags origin "refs/tags/${tag}" >/dev/null; then
+            echo "${tag} already exists; nothing to do"
+            exit 0
+          fi
+          git tag "${tag}" "${sha}"
+          git push origin "refs/tags/${tag}"
+          echo "Tagged ${sha} as ${tag}"

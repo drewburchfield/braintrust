@@ -1,11 +1,10 @@
 name: Release tag
 
-# Tags each release commit as v<version> from .claude-plugin/plugin.json,
+# Tags the release commit (last change to .claude-plugin/plugin.json) as v<version>,
 # so the marketplace pin resolves without a manual tag push.
 on:
   push:
     branches: [main]
-    paths: [.claude-plugin/plugin.json]
   workflow_dispatch:
     inputs:
       sha:
@@ -27,7 +26,8 @@ jobs:
         run: |
           version="$(jq -r .version .claude-plugin/plugin.json)"
           tag="v${version}"
-          sha="$(git rev-parse HEAD)"
+          # The release commit is the last one that touched plugin.json.
+          sha="$(git log -1 --format=%H -- .claude-plugin/plugin.json)"
           if git ls-remote --exit-code --tags origin "refs/tags/${tag}" >/dev/null; then
             echo "${tag} already exists; nothing to do"
             exit 0

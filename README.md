@@ -18,14 +18,14 @@ Delegates a task to peer AI CLIs in parallel. Second opinions on architecture, r
 - 6-step protocol: restatement, assumptions, evidence, fidelity, honesty, GROUNDED / NOT GROUNDED
 - Host actively curates context before delegating (not "whatever is in the chat")
 
-## Members (v1.15)
+## Members (v1.16)
 
 | Slot | CLI | Notes |
 |------|-----|-------|
 | Anthropic | Claude | `braintrust:peer` agent (Opus 5.5, 1M) inside Claude Code; `claude -p --model 'claude-opus-5-5[1m]' --safe-mode --settings '{"disableAllHooks":true}'` from other hosts |
 | Google | **agy only** | No Gemini CLI. Strongest Gemini High from `agy models` (**`gemini-4-argon-high`** as of 2026-10), falling back to the newest Flash High (`gemini-3.8-flash-high`); `--output-format json`. Loads user hooks (no switch) |
-| OpenAI | Codex | **`gpt-6-astra`** (GPT-6 Astra; fallback `gpt-6.1-sol`); isolated `CODEX_HOME` + `--ignore-user-config --ignore-rules`; CLI **0.160.0** verified |
-| xAI | Cursor CLI, else Grok CLI | Cursor: newest `grok-X.Y-high` (`grok-4.7-high` today), `--mode ask`. Grok CLI (optional fallback): `grok models` default, isolated `GROK_HOME` |
+| OpenAI | Codex | **`gpt-6-astra`** (GPT-6 Astra; fallback `gpt-6.1-sol`); isolated `CODEX_HOME` + `--ignore-user-config --ignore-rules`; CLI **0.166.0** verified (0.160.0 minimum) |
+| xAI | Cursor CLI, else Grok CLI | Cursor: newest `grok-X.Y-high` (`grok-4.7-high` today; `grok-4.7-medium` on the Cursor Free plan), `--mode ask`. Grok CLI (optional fallback): `grok models` default, isolated `GROK_HOME` |
 | Multi | OpenCode | User's configured/default model (expected `zai-coding-plan/glm-5.3`); `--variant max` for GLM-5.3; `--pure` |
 
 Up to **five** independent voices when everything is installed and authenticated. Availability is decided by `scripts/bt_probe.sh`, not by preference.
@@ -39,6 +39,11 @@ Every peer runs **identity-isolated**. The probe builds `$TMPDIR/bt-codex-home` 
 | `/braintrust` | Orchestrate a task across peer CLIs |
 | `/consult` | Alias for `/braintrust` |
 | `braintrust:peer` agent | Claude peer voice (Opus 5.5 1M, read-only) used by the Task tool |
+
+## v1.16.0 Highlights
+
+- **Cursor Free plan handled.** Cursor Free refuses `grok-4.7-high`; the probe now steps down to `grok-4.7-medium` so the xAI voice keeps answering, and reports Cursor's stderr error when nothing answers.
+- **Harness refresh** dogfooded 2026-11-01: claude 2.1.316, agy 1.4.11, codex 0.166.0, cursor-agent 2026.10.22, grok 1.0.70, opencode 1.19.4. Other pins hold; `gpt-6.1-terra` is new in Codex but sits below Astra.
 
 ## v1.15.1 Highlights
 

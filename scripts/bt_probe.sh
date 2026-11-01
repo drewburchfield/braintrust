@@ -23,10 +23,11 @@
 #      claude   -> Task tool inside Claude Code; else claude -p --safe-mode (no CLAUDE.md/MCP/plugins/hooks,
 #                  keeps keychain auth) + --settings '{"disableAllHooks":true}'
 #      agy      -> plain --print. hcom/herdr hooks live in ~/.gemini/config/hooks.json (since
-#                  2026-09-23) and agy has no switch to skip them; verified 2026-10-23 (agy 1.4.6)
+#                  2026-09-23) and agy has no switch to skip them; verified 2026-11-01 (agy 1.4.11)
 #                  that headless answers stay clean and register no hcom agent.
 #  * xAI slot: Cursor CLI (cursor-agent) first, Grok CLI second, one xAI voice per consult.
-#    Cursor pins the newest `grok-X.Y-high` it lists (grok-4.7-high as of 2026-10-16).
+#    Cursor pins the newest `grok-X.Y-high` it lists (grok-4.7-high as of 2026-11-01); on the
+#    Cursor Free plan, which refuses -high, it steps down to the same generation at -medium.
 #    Cursor has no flag to skip ~/.cursor/hooks.json or user rules, so the hcom notice
 #    line and rules still reach context; ask mode keeps them from turning into actions.
 #  * Grok CLI default comes from `grok models` ("Default model:"); fallback grok-4.7.
@@ -311,21 +312,32 @@ probe_cursor() {
   listing=$(cursor_run 30 "$bin" --list-models 2>/dev/null) || true
   model=$(resolve_cursor_model "$listing")
   [ -n "$model" ] || model="grok-4.7-high"
-  for a in 1 2; do
+  local note="" err_file="$D/cursor.err"
+  local tries=0
+  while [ "$tries" -lt 2 ]; do
     cursor_run 90 "$bin" -p "Reply with the single word: ok" \
       --model "$model" --output-format json --mode ask --trust --workspace "${TMPDIR:-/tmp}" \
-      < /dev/null > "$raw" 2>/dev/null
+      < /dev/null > "$raw" 2>"$err_file"
     out=$(jq -r 'select(.is_error != true) | .result // empty' "$raw" 2>/dev/null)
     if echo "$out" | grep -qi ok; then
       printf 'bt_cursor_available=true\nbt_cursor_model=%s\nbt_cursor_error=\n' "$model" > "$D/cursor.env"
       break
     fi
+    # Cursor Free refuses the -high/-xhigh Grok variants (ActionRequiredError on stderr,
+    # empty stdout) but includes the same generation at -medium. Step down once, with
+    # a fresh attempt budget, so the recorded model is always one that was tried.
+    if [ -z "$note" ] && grep -q 'unavailable on Free' "$err_file" 2>/dev/null && [ "${model%-high}" != "$model" ]; then
+      model="${model%-high}-medium"; note="; Cursor Free plan, -high refused"; tries=0; continue
+    fi
+    tries=$((tries + 1))
   done
   if grep -q 'bt_cursor_available=true' "$D/cursor.env"; then
-    echo "Cursor CLI: available ($ver; model=$model; --mode ask, cmux hooks off)" > "$D/cursor.log"
+    echo "Cursor CLI: available ($ver; model=$model; --mode ask, cmux hooks off$note)" > "$D/cursor.log"
   else
     local err
-    err=$(jq -r 'select(.is_error == true) | .result // .error // empty' "$raw" 2>/dev/null | tr -d '\n"'"'"'`$\\' | cut -c1-160)
+    err=$(jq -r 'select(.is_error == true) | .result // .error // empty' "$raw" 2>/dev/null)
+    [ -n "$err" ] || err=$(grep -m1 -E 'Error|error' "$err_file" 2>/dev/null)
+    err=$(printf '%s' "$err" | tr -d '\n"'"'"'`$\\' | cut -c1-160)
     printf 'bt_cursor_available=false\nbt_cursor_model=%s\nbt_cursor_error="%s"\n' "$model" "$err" > "$D/cursor.env"
     echo "Cursor CLI: no answer from $model ($ver)${err:+ — $err}" > "$D/cursor.log"
   fi
@@ -492,7 +504,7 @@ bt_opencode_variant=${bt_opencode_variant:-}
 bt_claude_cli_available=${bt_claude_cli_available:-false}
 bt_claude_model="${bt_claude_model:-claude-opus-5-5[1m]}"
 bt_probe_ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-bt_probe_version=1.15.1
+bt_probe_version=1.16.0
 EOF
 
 rm -rf "$D"

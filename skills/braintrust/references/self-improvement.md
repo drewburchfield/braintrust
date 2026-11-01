@@ -82,7 +82,7 @@ Treat local `--help` + dogfood as higher priority than blog posts.
 - [ ] Codex CLI ≥ 0.160.0 (`codex --version`); `~/.codex/models_cache.json` still lists `gpt-6-astra` (and `gpt-6.1-sol` as fallback). If a newer frontier model outranks Astra, move the pin
 - [ ] Every `bt_*=true` CLI returns a one-word headless ok **from its isolated home** (no agent-bus / hcom text in the answer)
 - [ ] SKILL + references mention no `gemini` binary path
-- [ ] Cursor pin is the newest `grok-X.Y-high` in `cursor-agent --list-models` (`grok-4.7-high` as of 2026-10-16)
+- [ ] Cursor pin is the newest `grok-X.Y-high` in `cursor-agent --list-models` (`grok-4.7-high` as of 2026-11-01; `-medium` only if `cursor-agent about` shows the Free tier)
 - [ ] Grok CLI (only if in use): default matches `Default model:` from an authenticated `grok models`
 - [ ] agy pin is the strongest `gemini-*-high` in `agy models` (`gemini-4-argon-high` as of 2026-10-16) and `bt_agy_fast_model` is the newest Flash High (`gemini-3.8-flash-high`). A new Gemini family name (not Flash) must still match the probe regex
 - [ ] agy and Cursor answers carry no hcom / agent-bus text (both load user hooks with no switch)

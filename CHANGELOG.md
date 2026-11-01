@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.16.0 — 2026-11-01
+
+Harness refresh plus a Cursor Free-plan fallback. Dogfooded against claude 2.1.316, agy 1.4.11 (gemini-4-argon-high), codex 0.166.0 (gpt-6-astra), cursor-agent 2026.10.22 (grok-4.7-medium on Free), grok 1.0.70 (signed out), opencode 1.19.4 (glm-5.3). Every documented flag is still in `--help`.
+
+- Cursor: the account is on the Free plan, which refuses `grok-4.7-high` with `ActionRequiredError: Model unavailable on Free` on stderr and empty stdout. The probe now steps down once to the same generation at `-medium`, and `bt_cursor_error` falls back to stderr text (it was empty).
+- Codex catalog adds `gpt-6.1-terra` (priority 3, cheaper tier). Astra stays the pin. Never pass `exec --cyber-access-program`.
+- agy 1.4.11 adds `--settings`, `--agent`, `--input-format stream-json`; `--settings` is untested as a hook switch. Grok 1.0.70 adds `--sandbox`, `--max-turns`, `--leader-socket`. OpenCode 1.19 aliases `auth` to `providers`.
+- Failure modes: `~/.grok/hooks/herdr.json` (added 2026-10-28) joins hcom.json; the isolated `GROK_HOME` skips both. New row for the Cursor Free-plan error.
+- No model outranks a pin: Gemini 4 Argon, GPT-6 Astra, Opus 5.5, Grok 4.7 and GLM-5.3 are still the newest in every catalog.
+- Eval 2026-11-01: contract-quiz on skill-current, agy (gemini-4-argon-high), codex (gpt-6-astra), cursor (grok-4.7-medium), opencode (glm-5.3) all 10/10.
+
 ## 1.15.1 — 2026-10-23
 
 Doc-only harness refresh. Dogfooded against claude 2.1.309, agy 1.4.6 (gemini-4-argon-high), codex 0.160.1 (gpt-6-astra), cursor-agent 2026.10.22 (grok-4.7-high), opencode 1.18.34 (glm-5.3). Every documented flag is still in `--help`; every pin holds.

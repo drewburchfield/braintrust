@@ -1,7 +1,7 @@
 ---
 name: braintrust
 description: Orchestrate other AI CLIs (Antigravity/agy, Codex, Cursor CLI or Grok for xAI, OpenCode, Claude Code) for second opinions, research, codebase analysis, design review, security audits, and parallel research. No Gemini CLI.
-version: 1.15.1
+version: 1.16.0
 ---
 
 # Braintrust
@@ -19,7 +19,7 @@ Consult peer AI CLIs in parallel for second opinions. **No Gemini CLI.**
 | Anthropic | Claude | `braintrust:peer` agent (Task tool) inside Claude Code; else `claude -p --model 'claude-opus-5-5[1m]' --safe-mode --settings '{"disableAllHooks":true}' --output-format json` |
 | Google | **agy only** | strongest `gemini-*-high` from probe (`gemini-4-argon-high` as of 2026-10-16; fast fallback `gemini-3.8-flash-high`); `--print` + `--output-format json` + `--dangerously-skip-permissions` (PTY if bare hangs) |
 | OpenAI | Codex | **`gpt-6-astra`** (GPT-6 Astra, frontier); fallback `gpt-6.1-sol`; isolated `CODEX_HOME`; Codex CLI 0.160.0 verified |
-| xAI | Cursor CLI, else Grok CLI | Probe sets `bt_xai_via`. Cursor: newest `grok-X.Y-high` it lists (`grok-4.7-high` as of 2026-10-16); `--mode ask`. Grok CLI (fallback, unverified since 1.0.30): `grok models` Default model (fallback `grok-4.7`); isolated `GROK_HOME` |
+| xAI | Cursor CLI, else Grok CLI | Probe sets `bt_xai_via`. Cursor: newest `grok-X.Y-high` it lists (`grok-4.7-high` as of 2026-11-01; `-medium` on the Cursor Free plan); `--mode ask`. Grok CLI (fallback, unverified since 1.0.30): `grok models` Default model (fallback `grok-4.7`); isolated `GROK_HOME` |
 | Multi | OpenCode | User default model from probe (expected `zai-coding-plan/glm-5.3`); `--variant max` when that id contains `glm-5.3`; `--pure` |
 
 Skip any CLI the probe marks unavailable. Host never peers with itself. Full consult is up to five independent voices.
@@ -42,7 +42,7 @@ Every peer runs from a clean profile. Ambient hooks (agent buses like hcom), MCP
 | Grok | `GROK_HOME=$bt_grok_home` (auth only; compat scanning off) + `GROK_DISABLE_AUTOUPDATER=1` + `--no-subagents` |
 | OpenCode | `--pure` (drops config plugins) |
 | Claude | `braintrust:peer` agent (`omitClaudeMd`, read-only); other hosts add `--safe-mode` (drops CLAUDE.md, plugins, MCP, hooks; keeps auth) + `--settings '{"disableAllHooks":true}'` |
-| agy | Plain `--print`. hcom and herdr hooks live in `~/.gemini/config/hooks.json` and agy has no switch to skip them. Verified 2026-10-23 (agy 1.4.6): headless answers stay clean. If an answer mentions hcom or an agent bus, skip the Google slot |
+| agy | Plain `--print`. hcom and herdr hooks live in `~/.gemini/config/hooks.json` and agy has no switch to skip them. Verified 2026-11-01 (agy 1.4.11): headless answers stay clean. If an answer mentions hcom or an agent bus, skip the Google slot |
 
 The probe creates the Codex and Grok homes. `-C` / `--cwd` / `--workspace` alone is **not** isolation.
 

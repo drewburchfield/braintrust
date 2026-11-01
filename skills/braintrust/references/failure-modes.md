@@ -22,12 +22,12 @@ The user's real homes carry SessionStart/PreToolUse hooks and plugins that talk 
 
 | CLI | Where hcom lives | Isolation that was verified clean |
 |-----|------------------|-----------------------------------|
-| grok | `~/.grok/hooks/hcom.json` (SessionStart) | `GROK_HOME=$bt_grok_home` (auth + minimal config, compat scanning off) + `--no-subagents` |
+| grok | `~/.grok/hooks/hcom.json` and `herdr.json` (SessionStart; herdr added 2026-10-28) | `GROK_HOME=$bt_grok_home` (auth + minimal config, compat scanning off) + `--no-subagents` |
 | codex | `~/.codex/hooks.json` + `hcom_*` keys in `config.toml` | `CODEX_HOME=$bt_codex_home` (no `hooks.json`) + `--ignore-user-config --ignore-rules` |
 | opencode | `~/.config/opencode/opencode.json` → `plugins/hcom.ts` | `--pure` |
 | claude | `~/.claude/settings.json` hooks, global CLAUDE.md, MCP, plugins | `braintrust:peer` agent inside Claude Code; `--safe-mode --settings '{"disableAllHooks":true}'` for `claude -p` |
 | cursor | `~/.cursor/hooks.json` (cmux, hcom notice), user rules, `~/.cursor/plugins` | `--mode ask` (no shell) + `CMUX_CURSOR_HOOKS_DISABLED=1` + no `--approve-mcps`/`--plugin-dir`. hcom notice still reaches context; verified it does not change answers |
-| agy | `~/.gemini/config/hooks.json` (hcom lifecycle + tool hooks, herdr; since 2026-09-23) | No switch to skip them. Verified 2026-10-23 (agy 1.4.6): headless answers clean, no hcom/herdr text. Watch for bus chatter; skip the slot if it appears |
+| agy | `~/.gemini/config/hooks.json` (hcom lifecycle + tool hooks, herdr; since 2026-09-23) | No switch to skip them. Verified 2026-11-01 (agy 1.4.11): headless answers clean, no hcom/herdr text. Watch for bus chatter; skip the slot if it appears |
 
 The probe builds both isolated homes under `$TMPDIR` on every run. Never point a consult at `~/.grok` or `~/.codex`.
 
@@ -63,6 +63,7 @@ The probe builds both isolated homes under `$TMPDIR` on every run. Never point a
 | Symptom | Cause | Fix |
 |---------|-------|-----|
 | `bt_cursor_error="not logged in"` | `cursor-agent status` lacks "Logged in as" | `cursor-agent login`; xAI slot falls to Grok CLI meanwhile |
+| Cursor answers empty, stderr `ActionRequiredError: Model unavailable on Free` | Cursor account on the Free plan, which only includes Grok 4.7/4.6 at fixed settings (seen 2026-11-01) | Probe steps down to `grok-X.Y-medium`; re-subscribe Cursor to get `-high` back |
 | Model id rejected | Grok generation renamed or retired | Re-run probe; it picks the newest `grok-X.Y-high` from `--list-models` |
 | Peer tried to run commands / edit | Ran without `--mode ask` or with `--force` | Always `--mode ask`; never `--force`, `--yolo`, `--approve-mcps`, `--plugin-dir` |
 | cmux feed noise | `CMUX_SURFACE_ID` inherited | `env -u CMUX_SURFACE_ID CMUX_CURSOR_HOOKS_DISABLED=1` |

@@ -48,8 +48,9 @@ LABEL = {"agy": "Google (agy)", "codex": "OpenAI (Codex)", "xai": "xAI",
 
 # Statuses. "ok" carries an answer; everything else is a named failure.
 RETRYABLE = {"timeout", "empty", "connection"}
-# Seconds-per-attempt multipliers. Grok on Cursor took 440-480s+ on a five-file review (2026-11-21).
-TIMEOUT_FACTOR = {"xai": 1.5}
+# Seconds-per-attempt multipliers. Grok on Cursor took 441s, 480s+ and 798s on file-reading reviews
+# of the same three to five files (2026-11-21); the other seats finished in 37-195s.
+TIMEOUT_FACTOR = {"xai": 2}
 PATTERNS = [  # order matters: first match wins
     ("cap", r"usage limit|hit your .*limit|quota|out of credits|insufficient credits|spending limit|billing|"
             r"rate.?limit|\b429\b|too many requests|unavailable on free"),

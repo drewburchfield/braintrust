@@ -10,7 +10,7 @@ Each peer was asked to create a file, then read one. None created the file.
 |------|------|------|
 | Codex | `-s read-only` | refuses writes; reads anywhere on disk |
 | agy | `--mode plan` + `--add-dir <root>` + `--dangerously-skip-permissions` | plan mode is the only write guard: print mode wrote files and ran `touch` with or without the skip flag, and `--sandbox` did too. Without the skip flag, headless agy auto-denies every shell command (grep, ls) and returns nothing. Plan mode is a slash command, so `--disable-slash-commands` turns it off; never combine them |
-| Cursor | `--mode ask` | blocks file creation. Still starts your Cursor MCP servers and reads `~/.grok/skills/*` on its own (seen 2026-11-21); there is no flag to stop either. Slowest seat: 7-8 min on a five-file review |
+| Cursor | `--mode ask` | blocks file creation. Still starts your Cursor MCP servers and reads `~/.grok/skills/*` on its own (seen 2026-11-21); there is no flag to stop either. Slowest seat: 7 to 13 min on a file-reading review (peerpanel gives it 2x the timeout) |
 | Grok CLI | `--permission-mode plan` | blocks writes until approval, which headless never gives |
 | OpenCode | `--agent plan` + isolated `opencode.json` with `permission: {edit: deny, bash: deny, webfetch: deny}` | `--auto` approves anything not denied, so the deny block matters |
 | Claude (`claude -p`) | `--allowedTools Read,Grep,Glob --disallowedTools Write,Edit,NotebookEdit,Bash` | the `braintrust:peer` agent disallows writes in its frontmatter |

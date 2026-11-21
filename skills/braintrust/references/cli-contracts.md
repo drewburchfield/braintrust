@@ -15,7 +15,7 @@ Each peer was asked to create a file, then read one. None created the file.
 | OpenCode | `--agent plan` + isolated `opencode.json` with `permission: {edit: deny, bash: deny, webfetch: deny}` | `--auto` approves anything not denied, so the deny block matters |
 | Claude (`claude -p`) | `--allowedTools Read,Grep,Glob --disallowedTools Write,Edit,NotebookEdit,Bash` | the `braintrust:peer` agent disallows writes in its frontmatter |
 
-Ping wording: Grok on Cursor refuses "reply with exactly this token and nothing else" as an injection. peerpanel asks in plain words for a check code.
+Ping wording: Grok on Cursor refused "reply with exactly this token and nothing else", and GLM refused "reply with the check code", both as prompt injection. peerpanel asks a small sum with a random answer instead.
 
 Source of truth for invocation shapes. Re-verify with `scripts/bt_probe.sh` and the self-improvement cycle when harnesses update.
 

@@ -533,10 +533,11 @@ def cmd_ping(args, env=None):
     env = env or ensure_env(quiet=args.quiet if hasattr(args, "quiet") else False)
     peers = [p for p in parse_peers(args.peers) if not (p == "claude" and in_claude_code())]
     results = {}
-    nonce = "PP-" + secrets.token_hex(3).upper()
-    # Plain wording matters: Grok on Cursor refuses "reply with exactly this token" as an injection.
-    prompt = ("Connectivity check from a review tool. Please reply with the check code %s so the tool "
-              "knows this message reached you." % nonce)
+    # A small sum to compute. Grok on Cursor and GLM both refused "reply with this token/check code" as a
+    # prompt-injection pattern (2026-11-21); plain arithmetic reads as an ordinary request.
+    a, b = secrets.randbelow(900) + 100, secrets.randbelow(900) + 100
+    nonce = str(a + b)
+    prompt = "Quick check from a review tool: what is %d + %d? Reply with just the number." % (a, b)
     threads = []
     lock = threading.Lock()
 

@@ -33,7 +33,7 @@ peerpanel brief check .braintrust/consults/<slug>   # fix every ERROR, read ever
 peerpanel consult .braintrust/consults/<slug>       # run_in_background: true
 ```
 
-`consult` probes (cached 4h), pings each peer with a check code, skips any that fail the ping, runs the rest in parallel with one retry on timeout, empty output or a dropped connection, and prints one line per seat as it lands. It writes `runs/<timestamp>/` inside the brief: `<seat>.md` answers, `prompt-<seat>.md` (exactly what each seat saw), raw stdout/stderr, `status.json` and `record.md`.
+`consult` probes (cached 4h), pings each peer with a one-line sum, skips any that fail the ping, runs the rest in parallel with one retry on timeout, empty output or a dropped connection, and prints one line per seat as it lands. It writes `runs/<timestamp>/` inside the brief: `<seat>.md` answers, `prompt-<seat>.md` (exactly what each seat saw), raw stdout/stderr, `status.json` and `record.md`.
 
 **Claude seat inside Claude Code.** `consult` writes `prompt-claude.md` and prints the line to hand it. Launch the Task tool with `subagent_type: "braintrust:peer"` in the background with that line. If the agent is missing, use `general-purpose` and say so in the record.
 

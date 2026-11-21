@@ -18,7 +18,7 @@
 | **Silent empty output** (exit 0, empty stderr; host can't tell timeout from auth) | Most failures in 23 consults, Aug-Nov 2026 | `peerpanel` names every outcome (`timeout`, `empty`, `connection`, `cap`, `auth`, `cli-changed`, `model`, `hijacked`, `off-task`) and retries only the first three, once |
 | Host guardrails block long inline peer commands (CC Safety Net, auto-mode classifier) | 4 of 23 consults | One short `peerpanel consult <brief>` command; no heredoc launchers |
 | Host-written brief carries the host's errors to every seat | 3 documented cases (an invented link repeated by all four peers; anchored estimates; omitted sources) | Fixed brief: user's words verbatim, sources the peers read themselves, host claims labeled unverified, host view withheld |
-| Cursor/Grok refuses "reply with exactly this token" as an injection | Seen 2026-11-21 | Preflight ping asks in plain words for a check code |
+| Grok and GLM refuse "reply with this token / check code" as an injection | Seen 2026-11-21 | Preflight ping asks a small sum with a random answer |
 
 ## Ambient hooks (hcom, cmux, herdr)
 

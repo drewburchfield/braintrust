@@ -58,7 +58,7 @@ Every peer runs **identity-isolated**. The probe builds `$TMPDIR/bt-codex-home` 
 
 - **`peerpanel` CLI.** One command replaces the hand-built launch lines. Built from a review of 23 real consults (Aug to Nov 2026), where most failures were silent empty outputs and host guardrails blocking long inline commands.
 - **Fixed brief shape.** Three of those consults showed the host's own errors reaching every peer through its brief. Peers now read the sources themselves and check the host's claims.
-- **Preflight ping.** A check-code round trip before each consult skips dead or hijacked peers instead of waiting out their timeouts.
+- **Preflight ping.** A one-line round trip before each consult skips dead or hijacked peers instead of waiting out their timeouts.
 - **Read-only peers.** Codex `-s read-only`, agy `--mode plan`, Cursor `--mode ask`, OpenCode `--agent plan`.
 
 ## v1.16.0 Highlights

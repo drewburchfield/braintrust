@@ -18,7 +18,20 @@ Delegates a task to peer AI CLIs in parallel. Second opinions on architecture, r
 - 6-step protocol: restatement, assumptions, evidence, fidelity, honesty, GROUNDED / NOT GROUNDED
 - Host actively curates context before delegating (not "whatever is in the chat")
 
-## Members (v1.16)
+## Quick start (v1.17)
+
+```bash
+peerpanel brief new .braintrust/consults/my-question   # scaffold the brief
+# fill request.md (the user's words, verbatim), question.md, sources.txt
+peerpanel brief check .braintrust/consults/my-question
+peerpanel consult .braintrust/consults/my-question     # one line per seat as it lands
+```
+
+`peerpanel` ships in the plugin's `bin/`, which Claude Code puts on PATH. It probes and pings the peers, runs them read-only and identity-isolated in parallel, retries once on a timeout, empty answer or dropped connection, names every other failure (`cap`, `auth`, `cli-changed`, `model`, `hijacked`, `off-task`), and writes each seat's prompt and answer plus `status.json` and `record.md`. It needs Python 3.9+ and nothing else. The name avoids `bt` and `braintrust`, which the npm `braintrust` package already installs.
+
+The brief has a fixed shape so the host model cannot quietly narrow what peers see: the user's request verbatim, source paths the peers open themselves, host claims labeled unverified, and the host's own view held back unless asked for.
+
+## Members (v1.17)
 
 | Slot | CLI | Notes |
 |------|-----|-------|
@@ -39,6 +52,14 @@ Every peer runs **identity-isolated**. The probe builds `$TMPDIR/bt-codex-home` 
 | `/braintrust` | Orchestrate a task across peer CLIs |
 | `/consult` | Alias for `/braintrust` |
 | `braintrust:peer` agent | Claude peer voice (Opus 5.5 1M, read-only) used by the Task tool |
+| `peerpanel` | CLI: `probe`, `ping`, `brief new/check`, `prompt`, `consult`, `status` |
+
+## v1.17.0 Highlights
+
+- **`peerpanel` CLI.** One command replaces the hand-built launch lines. Built from a review of 23 real consults (Aug to Nov 2026), where most failures were silent empty outputs and host guardrails blocking long inline commands.
+- **Fixed brief shape.** Three of those consults showed the host's own errors reaching every peer through its brief. Peers now read the sources themselves and check the host's claims.
+- **Preflight ping.** A check-code round trip before each consult skips dead or hijacked peers instead of waiting out their timeouts.
+- **Read-only peers.** Codex `-s read-only`, agy `--mode plan`, Cursor `--mode ask`, OpenCode `--agent plan`.
 
 ## v1.16.0 Highlights
 

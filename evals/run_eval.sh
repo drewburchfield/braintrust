@@ -68,6 +68,9 @@ build_package() {
       echo
       echo "### references/cli-contracts.md"
       cat skills/braintrust/references/cli-contracts.md
+      echo
+      echo "### references/manual-launch.md"
+      cat skills/braintrust/references/manual-launch.md
     else
       echo "unknown variant: $variant" >&2
       exit 2
@@ -196,10 +199,34 @@ score_ops_edge() {
   echo "${score}|${joined}"
 }
 
+score_peerpanel() {
+  local f="$1" t score=0 notes=()
+  t=$(cat "$f" 2>/dev/null || true)
+  [[ -z "$t" || "$t" == SKIPPED* || "${t%%$'\n'*}" == *_FAILED:* ]] && { echo "0|empty"; return; }
+  hit() { score=$((score+1)); notes+=("$1"); }
+  echo "$t" | grep -qiE 'brief new' && echo "$t" | grep -qiE 'brief check' && echo "$t" | grep -qiE 'consult' && hit Q1 || true
+  echo "$t" | grep -qiE 'request\.md' && echo "$t" | grep -qiE 'verbatim' && echo "$t" | grep -qiE 'question\.md' && hit Q2 || true
+  echo "$t" | grep -qiE 'sources\.txt' && echo "$t" | grep -qiE 'read access|read (them|the files|the paths)|themselves|open them' && hit Q3 || true
+  echo "$t" | grep -qiE 'claims\.md' && echo "$t" | grep -qiE 'unverified|confirm|refute' && hit Q4 || true
+  echo "$t" | grep -qiE 'host-view\.md|withheld' && echo "$t" | grep -qiE -- '--include-host-view' && hit Q5 || true
+  echo "$t" | grep -qiE 'braintrust:peer' && echo "$t" | grep -qiE 'Task tool|prompt-claude' && hit Q6 || true
+  echo "$t" | grep -qiE 'usage|plan limit|limit' && echo "$t" | grep -qiE 'not (one of the )?(re-?tried|retried)|no retry|isn.t retried|never retried|not (one of the )?retr' && hit Q7 || true
+  echo "$t" | grep -qiE 'timeout' && echo "$t" | grep -qiE 'empty' && echo "$t" | grep -qiE 'connection' && echo "$t" | grep -qiE 'once|one retry' && hit Q8 || true
+  echo "$t" | grep -qiE 'never auto-apply|not auto-apply|do not apply|stop for the user|present' && hit Q9 || true
+  local tail3; tail3=$(echo "$t" | grep -v '^[[:space:]]*$' | tail -3)
+  if echo "$tail3" | grep -qiE 'NOT GROUNDED'; then :; elif echo "$tail3" | grep -qiE '\bGROUNDED\b'; then hit Q10; fi
+  local joined; joined=$(IFS=,; echo "${notes[*]-}")
+  echo "${score}|${joined}"
+}
+
 score_result() {
   local f="$1"
   if [[ "${EVAL_FIXTURE:-contract-quiz}" == "ops-edge" ]]; then
     score_ops_edge "$f"
+    return
+  fi
+  if [[ "${EVAL_FIXTURE:-contract-quiz}" == "peerpanel-quiz" ]]; then
+    score_peerpanel "$f"
     return
   fi
   # Heuristic auto-score for contract-quiz (host can override manually)
@@ -286,7 +313,7 @@ if [[ "$FIXTURE" == "matrix" ]]; then
   echo -e "fixture\tvariant\tpeer\tscore\thits\tbytes\t~pkg_tok" >"$COMBINED"
   PEERS_CSV_SAVE="$PEERS_CSV"
   VARIANT_SAVE="${VARIANT:-all}"
-  for fix in contract-quiz ops-edge; do
+  for fix in peerpanel-quiz contract-quiz ops-edge; do
     echo "======== MATRIX fixture=$fix variants=$VARIANT_SAVE peers=$PEERS_CSV_SAVE ========"
     # re-enter as single-fixture run into a nested dir under matrix
     FIXTURE="$fix" VARIANT="$VARIANT_SAVE" PEERS_CSV="$PEERS_CSV_SAVE" \

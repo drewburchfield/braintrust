@@ -1,5 +1,22 @@
 # CLI Contracts (dogfooded 2026-11-21)
 
+`bin/peerpanel` builds every call below. This page records why each flag is there. When a CLI changes, update `build_cmd()` in `bin/peerpanel`, its tests in `evals/test_peerpanel.py`, and this page together.
+
+## Read-only modes (peerpanel 1.17, verified live 2026-11-21)
+
+Each peer was asked to create a file, then read one. None created the file.
+
+| Peer | Flag | Note |
+|------|------|------|
+| Codex | `-s read-only` | refuses writes; reads anywhere on disk |
+| agy | `--mode plan` + `--add-dir <root>` + `--dangerously-skip-permissions` | plan mode is the only write guard: print mode wrote files and ran `touch` with or without the skip flag, and `--sandbox` did too. Without the skip flag, headless agy auto-denies every shell command (grep, ls) and returns nothing. Plan mode is a slash command, so `--disable-slash-commands` turns it off; never combine them |
+| Cursor | `--mode ask` | blocks file creation. Still starts your Cursor MCP servers and reads `~/.grok/skills/*` on its own (seen 2026-11-21); there is no flag to stop either. Slowest seat: 7-8 min on a five-file review |
+| Grok CLI | `--permission-mode plan` | blocks writes until approval, which headless never gives |
+| OpenCode | `--agent plan` + isolated `opencode.json` with `permission: {edit: deny, bash: deny, webfetch: deny}` | `--auto` approves anything not denied, so the deny block matters |
+| Claude (`claude -p`) | `--allowedTools Read,Grep,Glob --disallowedTools Write,Edit,NotebookEdit,Bash` | the `braintrust:peer` agent disallows writes in its frontmatter |
+
+Ping wording: Grok on Cursor refuses "reply with exactly this token and nothing else" as an injection. peerpanel asks in plain words for a check code.
+
 Source of truth for invocation shapes. Re-verify with `scripts/bt_probe.sh` and the self-improvement cycle when harnesses update.
 
 ## Roster (no Gemini CLI)
@@ -52,7 +69,7 @@ fi
 - No `@path` includes. Inline file content. Display names from `agy models` may include third-party brands (Claude, GPT-OSS); that is **not** an instruction to run the Gemini CLI or to route Claude through agy.
 - `--print-timeout` is unreliable as a hard bound; use external `timeout` or the PTY wrapper.
 - macOS: warm keychain before first call if OAuth re-prompts: `security find-generic-password -s "Antigravity Safe Storage" >/dev/null 2>&1 || true`
-- `--effort`: Neon and Hydrogen now offer `xhigh`; Argon and Flash top out at `high`. A suffixed slug (`gemini-4-neon-high`) fixes the effort, so omit `--effort` or pass the matching value; any other value errors (`conflicts with --effort=max`). Never `--remote-control` or `--mode auto` in a consult. `--json-schema` for structured answers. `--disable-slash-commands` for evals. `--sandbox` when the peer may run commands.
+- `--effort`: Neon and Hydrogen now offer `xhigh`; Argon and Flash top out at `high`. A suffixed slug (`gemini-4-neon-high`) fixes the effort, so omit `--effort` or pass the matching value; any other value errors (`conflicts with --effort=max`). Never `--remote-control` or `--mode auto` in a consult. `--json-schema` for structured answers. `--disable-slash-commands` only for evals, never with `--mode plan`. `--sandbox` when the peer may run commands.
 
 ## Codex
 

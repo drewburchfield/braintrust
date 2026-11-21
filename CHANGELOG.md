@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.17.0 — 2026-11-21
+
+`peerpanel`: one command for the whole consult. Built from a review of 23 real braintrust consults (Aug 20 to Nov 16, 2026). About 85% of launched seats eventually answered, but most failures arrived as an empty file with exit 0, hosts hand-wrote launchers that CC Safety Net and the auto-mode classifier blocked, and in three consults the host's own errors reached every peer through its brief.
+
+- **`bin/peerpanel`** (Python 3.9+ stdlib, on PATH inside Claude Code). `probe`, `ping`, `brief new/check`, `prompt`, `consult`, `status`. The name avoids `bt` and `braintrust`, which the npm `braintrust` package installs.
+- **Named outcomes.** Every seat ends `ok`, `timeout`, `empty`, `connection`, `cap`, `auth`, `cli-changed`, `model`, `hijacked`, `off-task`, `error`, `skipped`, `unavailable`, `missing` or `host`. A timeout or structured error beats partial streamed text. Only `timeout`, `empty` and `connection` are retried, once; the agy retry drops to the fast model and Codex falls back to `gpt-6.2-sol` on a model error.
+- **Fixed brief.** `request.md` (the user's words, verbatim), `question.md`, `sources.txt` (paths the peers open themselves), `claims.md` (host claims, labeled unverified), `context.md`, and `host-view.md` (withheld unless `--include-host-view`). `brief check` errors on missing paths or a host view inside the peers' read root, and warns on empty sources and secret-looking files. `--text-only` inlines sources with a 60 KB cap.
+- **Preflight ping.** A check-code round trip using the exact consult command lines. Hard failures skip the seat; slow pings still run. The wording asks plainly, because Grok on Cursor refuses "reply with exactly this token".
+- **Read-only peers**, each refusing a live write test: Codex `-s read-only`, agy `--mode plan` (print mode and `--sandbox` both let agy write; plan mode refused. `--dangerously-skip-permissions` stays, because without it headless agy denies every shell command and returns nothing; `--disable-slash-commands` would switch plan mode off), Cursor `--mode ask`, Grok `--permission-mode plan`, OpenCode `--agent plan` plus an isolated `opencode.json` that denies edit, bash and webfetch, `claude -p` without Write, Edit or Bash.
+- **Run folder.** Each seat's exact prompt, answer, raw stdout/stderr, `status.json` and a `record.md` skeleton. Answers stay outside every read root until all seats finish.
+- Output goes to files, so a helper process that outlives its CLI (MCP servers Cursor starts, a standalone OpenCode server) cannot hold a finished seat open; the whole process group is cleared after each call.
+- Ctrl-C or SIGTERM kills every running seat's process group. `--host` leaves the calling CLI's seat out on hosts other than Claude Code. The `braintrust:peer` agent now disallows Bash too. OpenCode refuses to run if its deny config cannot be written.
+- The xAI seat gets 1.5x the attempt timeout (720s by default): Grok on Cursor took 440 to 480+ seconds on a five-file review. A bus marker (`[hcom:…]`) marks an answer hijacked; prose about joining a bus only does in a short answer, so a review that discusses agent buses survives.
+- Probe runs under a 300s limit (its process group is killed on timeout) with a Python `timeout` shim when macOS has neither `timeout` nor `gtimeout`; jq is checked first.
+- **Skill rewritten around the CLI** (about half the length). Raw launch lines moved to `references/manual-launch.md` as a fallback. `cli-contracts.md` gains the read-only table; `failure-modes.md` gains the transcript findings.
+- Evals: `evals/test_peerpanel.py` (offline unit tests) and a `peerpanel-quiz` fixture for the live runner.
+
 ## 1.16.0 — 2026-11-21
 
 Model + harness refresh. Every peer CLI was updated to its latest release and answered a live call: claude 2.1.330, agy 1.5.14, codex 0.170.0, cursor-agent 2026.11.19, grok 1.0.92, opencode 2.3.2.

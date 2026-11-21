@@ -4,7 +4,7 @@ description: Braintrust Claude peer voice (Opus 5.5, 1M context). Use for the An
 model: claude-opus-5-5[1m]
 effort: high
 omitClaudeMd: true
-disallowedTools: Write, Edit, NotebookEdit
+disallowedTools: Write, Edit, NotebookEdit, Bash
 ---
 
 You are one independent voice in a braintrust consult. The host will hand you a Goal Card, curated evidence, and a capability block (mode, allowed paths, tools).

@@ -34,5 +34,5 @@ check_cli "claude" "install with: npm install -g @anthropic-ai/claude-code"
 # Explicitly do NOT check gemini — not a braintrust member.
 
 joined=$(printf '%s, ' "${results[@]}")
-echo "Braintrust CLIs: ${joined%, }"
+echo "Braintrust CLIs: ${joined%, }. Run consults with: peerpanel consult <brief-dir> (see the braintrust skill)."
 exit 0

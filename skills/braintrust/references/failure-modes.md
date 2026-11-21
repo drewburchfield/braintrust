@@ -11,7 +11,7 @@
 | Vision claims to text-only peers | Occasional | One Mode E peer; others get transcription + flag vision-dependent claims |
 | agy empty / hang (pre-1.1.0) | High historically | Probe bare first; PTY fallback; no gemini fallback |
 | Codex off-topic / memory contamination | Documented | Isolated `CODEX_HOME` + `--ignore-user-config` + `--ignore-rules` + scratch `-C` |
-| **Peer joins an agent bus (hcom) instead of answering** | Observed 2026-09-16 (grok) | Identity isolation on every CLI: `GROK_HOME`, `CODEX_HOME`, Cursor `--mode ask`, `--pure`, `braintrust:peer` / `--safe-mode`. agy has hooks but no switch. See "Ambient hooks" below |
+| **Peer joins an agent bus (hcom) instead of answering** | Observed 2026-09-16 (grok) | Identity isolation on every CLI: `GROK_HOME`, `CODEX_HOME`, Cursor `--mode ask`, OpenCode config root, `braintrust:peer` / `--safe-mode`. agy has hooks but no switch. See "Ambient hooks" below |
 | Codex stdin hang | Common in harnesses | Always `< /dev/null` |
 | Codex timeout on binary-heavy tasks | Occasional | Pre-extract text artifacts; raise timeout only after context shrink |
 | Probe thrash (slow cold start marks CLI down) | Historical | Parallel probe, one warm retry, timeout = down without thrash |
@@ -24,10 +24,10 @@ The user's real homes carry SessionStart/PreToolUse hooks and plugins that talk 
 |-----|------------------|-----------------------------------|
 | grok | `~/.grok/hooks/hcom.json` and `herdr.json` (SessionStart; herdr added 2026-10-28) | `GROK_HOME=$bt_grok_home` (auth + minimal config, compat scanning off) + `--no-subagents` |
 | codex | `~/.codex/hooks.json` + `hcom_*` keys in `config.toml` | `CODEX_HOME=$bt_codex_home` (no `hooks.json`) + `--ignore-user-config --ignore-rules` |
-| opencode | `~/.config/opencode/opencode.json` → `plugins/hcom.ts` | `--pure` |
+| opencode | `~/.config/opencode/` → `plugins/` (hcom, herdr-agent-state.js), MCP, skills | Empty `XDG_CONFIG_HOME` + `--standalone` (2.x removed `--pure`) |
 | claude | `~/.claude/settings.json` hooks, global CLAUDE.md, MCP, plugins | `braintrust:peer` agent inside Claude Code; `--safe-mode --settings '{"disableAllHooks":true}'` for `claude -p` |
 | cursor | `~/.cursor/hooks.json` (cmux, hcom notice), user rules, `~/.cursor/plugins` | `--mode ask` (no shell) + `CMUX_CURSOR_HOOKS_DISABLED=1` + no `--approve-mcps`/`--plugin-dir`. hcom notice still reaches context; verified it does not change answers |
-| agy | `~/.gemini/config/hooks.json` (hcom lifecycle + tool hooks, herdr; since 2026-09-23) | No switch to skip them. Verified 2026-11-01 (agy 1.4.11): headless answers clean, no hcom/herdr text. Watch for bus chatter; skip the slot if it appears |
+| agy | `~/.gemini/config/hooks.json` (hcom lifecycle + tool hooks, herdr; since 2026-09-23) | No switch to skip them. Verified 2026-11-21 (agy 1.5.14): headless answers clean, no hcom/herdr text. Watch for bus chatter; skip the slot if it appears |
 
 The probe builds both isolated homes under `$TMPDIR` on every run. Never point a consult at `~/.grok` or `~/.codex`.
 
@@ -42,7 +42,7 @@ The probe builds both isolated homes under `$TMPDIR` on every run. Never point a
 | Empty after success previously | Quota (#56) | Stop calling agy this session; note gap |
 | Exit 0 with empty stdout | Dropped agent stream (fixed in 1.1.18) | Treat empty as failure; prefer `--output-format json` and check `.status` |
 | Pinned slug 404 | Older generation retired (3.7/3.6 Flash and 3.1 Pro left in agy 1.4.0) | Probe picks the strongest `gemini-*-high` from `agy models` and falls back to the newest Flash High; re-run probe |
-| Google slot slow on big packages | Argon High is ~2.5x slower than Flash High | Use `$bt_agy_fast_model` for quick checks; keep Argon for the real consult |
+| Google slot slow on big packages | Neon High is ~1.5-2x slower than Flash High | Use `$bt_agy_fast_model` for quick checks; keep Neon for the real consult |
 | Answer mentions hcom / agent bus | `~/.gemini/config/hooks.json` hcom hooks fired | No isolation switch exists. Skip the Google slot and note it; do not edit the user's hooks from a consult |
 
 ### Codex
@@ -56,7 +56,7 @@ The probe builds both isolated homes under `$TMPDIR` on every run. Never point a
 | `CODEX_FAILED: error` with no text | jq read `.error.message` only | `error` events put text on `.message`; use `$err.error.message // $err.message` |
 | Hook ran inside consult | `$CODEX_HOME/hooks.json` present | Isolated home must contain only `auth.json` + one-line `config.toml` |
 | `CODEX_FAILED` auth error with env not sourced | Fallback `/tmp/bt-codex-home` has no auth; probe built the home under `$TMPDIR` | `source /tmp/bt_models.env` first; fallbacks use `${TMPDIR:-/tmp}` |
-| Probe lands on `gpt-6.1-sol` | Astra unavailable for this account or CLI | Expected fallback; upgrade CLI or check plan. Note the model in coverage |
+| Probe lands on `gpt-6.2-sol` | Astra unavailable for this account or CLI | Expected fallback; upgrade CLI or check plan. Note the model in coverage |
 
 ### Cursor
 
@@ -86,11 +86,12 @@ The probe builds both isolated homes under `$TMPDIR` on every run. Never point a
 
 | Symptom | Cause | Fix |
 |---------|-------|-----|
-| Slow / MCP noise | Default plugins + MCP | `--pure` for braintrust |
+| Slow / MCP noise | Default plugins + MCP | Empty `XDG_CONFIG_HOME` for braintrust |
+| `Unrecognized flag: --pure` (or `--variant`) | OpenCode 2.x removed both | Use the isolated config root and `-m <model>#<variant>`; re-run the probe |
 | Permission wait | Tools need approval | `--auto` for headless consults |
 | Wrong/weak free model on headless | `run` without config `model` often picks openrouter `:free` | Set `"model"` in `~/.config/opencode/opencode.json`; probe uses last non-free session as fallback |
 | Empty text events | Auth / provider down | `opencode auth list`; retry once |
-| Plugin chatter in answer | Ran without `--pure` | Always `--pure`; probe log says "--pure drops config plugins" |
+| Plugin chatter in answer | Ran against the real `~/.config/opencode` | Always run under `$bt_opencode_config`; probe log says "isolated XDG_CONFIG_HOME" |
 | `glm-5.3-highspeed` hangs ~80s then 429 "subscription plan does not yet include access" | Not on the Z.AI Coding Plan; error is marked retryable so OpenCode keeps retrying | Do not select highspeed; stay on `glm-5.3`. Always wrap in `timeout` |
 | Resolved model is not glm-5.3 | Config `model` changed | Set `"model": "zai-coding-plan/glm-5.3"` in `~/.config/opencode/opencode.json`; probe warns |
 
@@ -116,10 +117,10 @@ timeout 60 agy --print "say ok" --dangerously-skip-permissions --output-format j
   ${bt_agy_model:+--model "$bt_agy_model"} 2>/tmp/bt_agy.err \
   | jq -r 'if .status=="SUCCESS" then .response else .error // .status end'
 
-# codex (GPT-6 Astra primary; CLI 0.160.0 verified)
+# codex (GPT-6.2 Astra primary; CLI 0.170.0 verified)
 CODEX_HOME="${bt_codex_home:-${TMPDIR:-/tmp}/bt-codex-home}" \
   codex exec --ephemeral --ignore-user-config --ignore-rules -s read-only --json --skip-git-repo-check \
-  -m "${bt_codex_model:-gpt-6-astra}" \
+  -m "${bt_codex_model:-gpt-6.2-astra}" \
   -C "${TMPDIR:-/tmp}" "say ok" < /dev/null 2>/tmp/bt_codex.err \
   | jq -rs '(map(select(.type=="error" or .type=="turn.failed")) | last) as $e
             | if $e then ($e.error.message // $e.message) else (map(select(.item.type?=="agent_message")) | last | .item.text) end'
@@ -136,10 +137,12 @@ GROK_HOME="${bt_grok_home:-${TMPDIR:-/tmp}/bt-grok-home}" GROK_DISABLE_AUTOUPDAT
   | jq -r 'if .type=="error" then .message else .text end'
 
 # opencode
-OC_ARGS=(run --format json --auto --pure)
-[ -n "${bt_opencode_model:-}" ] && OC_ARGS+=(-m "$bt_opencode_model")
-[ -n "${bt_opencode_variant:-}" ] && OC_ARGS+=(--variant "$bt_opencode_variant")
-opencode "${OC_ARGS[@]}" "say ok" 2>/tmp/bt_opencode.err \
+OC_ARGS=(run --standalone --format json --auto)
+oc_m="${bt_opencode_model:-}"; [[ -n "$oc_m" && -n "${bt_opencode_variant:-}" ]] && oc_m="$oc_m#$bt_opencode_variant"
+[[ -n "$oc_m" ]] && OC_ARGS+=(-m "$oc_m")
+env XDG_CONFIG_HOME="${bt_opencode_config:-${TMPDIR:-/tmp}/bt-opencode-config}" \
+  OPENCODE_DISABLE_PROJECT_CONFIG=1 OPENCODE_DISABLE_CLAUDE_CODE=1 OPENCODE_DISABLE_AUTOUPDATE=1 \
+  opencode "${OC_ARGS[@]}" "say ok" 2>/tmp/bt_opencode.err \
   | jq -rs 'map(select(.type=="text") | .part.text // .text // empty) | map(select(length>0)) | last'
 ```
 

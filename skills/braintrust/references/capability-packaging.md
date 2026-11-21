@@ -87,7 +87,7 @@ Claude is usually your **best file-capable verifier** when the host is Claude Co
 |------|-----|
 | Headless answer | `--print` + `--output-format json` + `--dangerously-skip-permissions`; parse `.response` |
 | Extra roots | `--add-dir` (repeatable) when files live outside cwd |
-| Model pin | `--model "$bt_agy_model"` (strongest `gemini-*-high`; `gemini-4-argon-high` as of 2026-10-16, fast `$bt_agy_fast_model`). Slugs from `agy models` |
+| Model pin | `--model "$bt_agy_model"` (strongest `gemini-*-high`; `gemini-4-neon-high` as of 2026-11-21, fast `$bt_agy_fast_model`). Slugs from `agy models` |
 | No `@path` | **Inline** or ensure cwd/`--add-dir` and tell it relative paths |
 | Artifacts | It may write under its brain dir; host should copy useful drafts back into the repo |
 | Identity | No isolation switch. `~/.gemini/config/hooks.json` (hcom, herdr) loads on every run; keep packages self-contained and watch for bus chatter |
@@ -114,10 +114,10 @@ Claude is usually your **best file-capable verifier** when the host is Claude Co
 
 | Need | How |
 |------|-----|
-| Fast unbiased consult | `run --format json --auto --pure` (+ `-m` only if probe set user's default model; `--variant` when `bt_opencode_variant` is set) |
+| Fast unbiased consult | `run --standalone --format json --auto` under an empty `XDG_CONFIG_HOME` (+ `-m` only if probe set user's default model, as `-m <model>#<variant>` when `bt_opencode_variant` is set) |
 | Attach files | `--file` / `-f` (repeatable) |
-| Repo cwd | `--dir` path |
-| MCP / plugins | `--pure` skips config plugins (hcom, cmux feeds) and is the isolation knob. Drop `--pure` only when a **named** local MCP is required and already healthy. |
+| Repo cwd | `cd` into the repo first (OpenCode 2.x `run` has no `--dir`) |
+| MCP / plugins | The empty config root skips config plugins (hcom, herdr, cmux feeds) and MCP; it is the isolation knob. Use the real config only when a **named** local MCP is required and already healthy. |
 | Permissions | `--auto` for headless tool use; still keep the task read-only in the prompt |
 
 ---

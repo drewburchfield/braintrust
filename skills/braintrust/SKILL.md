@@ -17,10 +17,10 @@ Consult peer AI CLIs in parallel for second opinions. **No Gemini CLI.**
 | Slot | CLI | Default |
 |------|-----|---------|
 | Anthropic | Claude | `braintrust:peer` agent (Task tool) inside Claude Code; else `claude -p --model 'claude-opus-5-5[1m]' --safe-mode --settings '{"disableAllHooks":true}' --output-format json` |
-| Google | **agy only** | strongest `gemini-*-high` from probe (`gemini-4-argon-high` as of 2026-10-16; fast fallback `gemini-3.8-flash-high`); `--print` + `--output-format json` + `--dangerously-skip-permissions` (PTY if bare hangs) |
-| OpenAI | Codex | **`gpt-6-astra`** (GPT-6 Astra, frontier); fallback `gpt-6.1-sol`; isolated `CODEX_HOME`; Codex CLI 0.160.0 verified |
-| xAI | Cursor CLI, else Grok CLI | Probe sets `bt_xai_via`. Cursor: newest `grok-X.Y-high` it lists (`grok-4.7-high` as of 2026-11-01; `-medium` on the Cursor Free plan); `--mode ask`. Grok CLI (fallback, unverified since 1.0.30): `grok models` Default model (fallback `grok-4.7`); isolated `GROK_HOME` |
-| Multi | OpenCode | User default model from probe (expected `zai-coding-plan/glm-5.3`); `--variant max` when that id contains `glm-5.3`; `--pure` |
+| Google | **agy only** | strongest `gemini-*-high` from probe (`gemini-4-neon-high` as of 2026-11-21; fast fallback `gemini-3.8-flash-high`); `--print` + `--output-format json` + `--dangerously-skip-permissions` (PTY if bare hangs) |
+| OpenAI | Codex | **`gpt-6.2-astra`** (GPT-6.2 Astra, frontier); fallback `gpt-6.2-sol`; isolated `CODEX_HOME`; Codex CLI 0.170.0 verified |
+| xAI | Cursor CLI, else Grok CLI | Probe sets `bt_xai_via`. Cursor: newest `grok-X.Y-high` it lists (`grok-4.7-high` as of 2026-11-21; `-medium` on the Cursor Free plan); `--mode ask`. Grok CLI (fallback, verified 1.0.92): `grok models` Default model (fallback `grok-4.7`); isolated `GROK_HOME` |
+| Multi | OpenCode | User default model from probe (expected `zai-coding-plan/glm-5.3`); `-m <model>#max` when that id contains `glm-5.3`; empty `XDG_CONFIG_HOME` + `--standalone` |
 
 Skip any CLI the probe marks unavailable. Host never peers with itself. Full consult is up to five independent voices.
 
@@ -40,9 +40,9 @@ Every peer runs from a clean profile. Ambient hooks (agent buses like hcom), MCP
 | Codex | `CODEX_HOME=$bt_codex_home` (auth only) + `--ignore-user-config --ignore-rules` |
 | Cursor | Normal login. `--mode ask` (read-only, no shell, so no hcom join) + no `--approve-mcps` + `env -u CMUX_SURFACE_ID CMUX_CURSOR_HOOKS_DISABLED=1`, run from `$TMPDIR`. Cursor has no switch for `~/.cursor/hooks.json`, user rules, or `~/.cursor/plugins`, so the hcom notice and rules still reach context. Never pass `--plugin-dir` |
 | Grok | `GROK_HOME=$bt_grok_home` (auth only; compat scanning off) + `GROK_DISABLE_AUTOUPDATER=1` + `--no-subagents` |
-| OpenCode | `--pure` (drops config plugins) |
+| OpenCode | Empty `XDG_CONFIG_HOME` (`$bt_opencode_config`) + `OPENCODE_DISABLE_PROJECT_CONFIG=1` + `OPENCODE_DISABLE_CLAUDE_CODE=1` + `--standalone` (OpenCode 2.x has no `--pure`) |
 | Claude | `braintrust:peer` agent (`omitClaudeMd`, read-only); other hosts add `--safe-mode` (drops CLAUDE.md, plugins, MCP, hooks; keeps auth) + `--settings '{"disableAllHooks":true}'` |
-| agy | Plain `--print`. hcom and herdr hooks live in `~/.gemini/config/hooks.json` and agy has no switch to skip them. Verified 2026-11-01 (agy 1.4.11): headless answers stay clean. If an answer mentions hcom or an agent bus, skip the Google slot |
+| agy | Plain `--print`. hcom and herdr hooks live in `~/.gemini/config/hooks.json` and agy has no switch to skip them. Verified 2026-11-21 (agy 1.5.14): headless answers stay clean. If an answer mentions hcom or an agent bus, skip the Google slot |
 
 The probe creates the Codex and Grok homes. `-C` / `--cwd` / `--workspace` alone is **not** isolation.
 
@@ -110,11 +110,11 @@ timeout 120 agy "${AGY_ARGS[@]}" 2>/tmp/bt_agy.err \
 # NEVER fall back to gemini CLI; skip Google slot and note the gap
 ```
 
-Default pin: the strongest `gemini-*-high` slug from `agy models`, newest generation first (**`gemini-4-argon-high`** as of 2026-10-16). `bt_agy_fast_model` (`gemini-3.8-flash-high`) is the fallback and the quick option; Argon High takes ~2.5x longer. Empty `bt_agy_model` means account-tier.
+Default pin: the strongest `gemini-*-high` slug from `agy models`, newest generation first, then family rank Neon > Carbon > Argon > Hydrogen (**`gemini-4-neon-high`**, Gemini 4 Neon, as of 2026-11-21). `bt_agy_fast_model` (`gemini-3.8-flash-high`) is the fallback and the quick option; Neon High takes ~1.5x longer. Empty `bt_agy_model` means account-tier.
 
-### Codex (GPT-6 Astra primary; identity isolated; workspace optional)
+### Codex (GPT-6.2 Astra primary; identity isolated; workspace optional)
 
-Primary model: **`gpt-6-astra`** (OpenAI GPT-6 Astra, frontier). Fallback `gpt-6.1-sol` (latest workhorse), then product default. Verified on Codex CLI 0.160.0 (`npm i -g @openai/codex@latest`). Because consults use `--ignore-user-config`, always pass **`-m`** explicitly.
+Primary model: **`gpt-6.2-astra`** (OpenAI GPT-6.2 Astra, frontier). Fallback `gpt-6.2-sol` (latest workhorse), then product default. Verified on Codex CLI 0.170.0 (`npm i -g @openai/codex@latest`). Because consults use `--ignore-user-config`, always pass **`-m`** explicitly.
 
 ```bash
 source /tmp/bt_models.env 2>/dev/null
@@ -124,7 +124,7 @@ if [ -n "${bt_codex_model+x}" ] && [ -z "${bt_codex_model}" ]; then
 elif [ -n "${bt_codex_model:-}" ]; then
   CODEX_MODEL_ARGS=(-m "$bt_codex_model")
 else
-  CODEX_MODEL_ARGS=(-m "gpt-6-astra")
+  CODEX_MODEL_ARGS=(-m "gpt-6.2-astra")
 fi
 CODEX_HOME="${bt_codex_home:-${TMPDIR:-/tmp}/bt-codex-home}" \
   timeout 150 codex exec --ephemeral --ignore-user-config --ignore-rules -s read-only --json --skip-git-repo-check \
@@ -181,10 +181,12 @@ For packages that may exceed argv limits, write `$QUERY` to a temp file and use 
 
 ```bash
 source /tmp/bt_models.env 2>/dev/null
-OC_ARGS=(run --format json --auto --pure)
-[ -n "${bt_opencode_model:-}" ] && OC_ARGS+=(-m "$bt_opencode_model")
-[ -n "${bt_opencode_variant:-}" ] && OC_ARGS+=(--variant "$bt_opencode_variant")
-timeout 120 opencode "${OC_ARGS[@]}" "$QUERY" 2>/tmp/bt_opencode.err \
+OC_ARGS=(run --standalone --format json --auto)
+oc_m="${bt_opencode_model:-}"; [[ -n "$oc_m" && -n "${bt_opencode_variant:-}" ]] && oc_m="$oc_m#$bt_opencode_variant"
+[[ -n "$oc_m" ]] && OC_ARGS+=(-m "$oc_m")
+timeout 120 env XDG_CONFIG_HOME="${bt_opencode_config:-${TMPDIR:-/tmp}/bt-opencode-config}" \
+  OPENCODE_DISABLE_PROJECT_CONFIG=1 OPENCODE_DISABLE_CLAUDE_CODE=1 OPENCODE_DISABLE_AUTOUPDATE=1 \
+  opencode "${OC_ARGS[@]}" "$QUERY" 2>/tmp/bt_opencode.err \
   | jq -rs '
       (map(select(.type=="error")) | last) as $err
       | if $err then "OPENCODE_FAILED: "+(($err.error.message // $err.error // "") | tostring)
@@ -193,11 +195,11 @@ timeout 120 opencode "${OC_ARGS[@]}" "$QUERY" 2>/tmp/bt_opencode.err \
     '
 ```
 
-Only pass `-m` when probe set `bt_opencode_model`. Probe model order: (1) `"model"` in OpenCode config, (2) last non-free session, (3) omit `-m`. Never hardcode a vendor model id in the launch line. Expected id on this setup: `zai-coding-plan/glm-5.3`; the probe warns when the resolved id lacks `glm-5.3`. Probe sets `bt_opencode_variant=max` when the resolved id contains `glm-5.3`. `--pure` is what keeps config plugins (hcom, cmux feeds) out of the consult.
+Only pass `-m` when probe set `bt_opencode_model`. Probe model order: (1) `"model"` in OpenCode config, (2) last non-free session, (3) omit `-m`. Never hardcode a vendor model id in the launch line. Expected id on this setup: `zai-coding-plan/glm-5.3`; the probe warns when the resolved id lacks `glm-5.3`. Probe sets `bt_opencode_variant=max` when the resolved id contains `glm-5.3`. The empty config root is what keeps config plugins (hcom, herdr, cmux feeds), MCP servers and user skills out of the consult.
 
 ## Capability knobs (do not collapse)
 
-1. **Identity isolation** — whose memories/AGENTS/MCP/hooks load (default: clean, via `CODEX_HOME`, Cursor `--mode ask`, `GROK_HOME`, `--pure`, `braintrust:peer`).  
+1. **Identity isolation** — whose memories/AGENTS/MCP/hooks load (default: clean, via `CODEX_HOME`, Cursor `--mode ask`, `GROK_HOME`, OpenCode config root, `braintrust:peer`).  
 2. **Workspace access** — which files/cwd the peer may use (default: task-shaped package).
 
 ### Modes (pick one primary per peer)

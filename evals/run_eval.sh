@@ -108,7 +108,7 @@ run_peer() {
       if [[ -n "${bt_codex_model+x}" && -z "${bt_codex_model}" ]]; then
         model_args=()
       else
-        model_args=(-m "${bt_codex_model:-gpt-6-astra}")
+        model_args=(-m "${bt_codex_model:-gpt-6.2-astra}")
       fi
       CODEX_HOME="$home" timeout 150 codex exec --ephemeral --ignore-user-config --ignore-rules \
         -s read-only --json --skip-git-repo-check "${model_args[@]}" -C "${TMPDIR:-/tmp}" "$q" \
@@ -146,10 +146,12 @@ run_peer() {
       if [[ "${bt_opencode_available:-true}" == "false" ]]; then
         echo "SKIPPED unavailable" >"$outdir/result.txt"; return
       fi
-      local args=(run --format json --auto --pure)
-      [[ -n "${bt_opencode_model:-}" ]] && args+=(-m "$bt_opencode_model")
-      [[ -n "${bt_opencode_variant:-}" ]] && args+=(--variant "$bt_opencode_variant")
-      timeout 150 opencode "${args[@]}" "$q" 2>"$outdir/stderr.txt" \
+      local args=(run --standalone --format json --auto)
+      local oc_m="${bt_opencode_model:-}"; [[ -n "$oc_m" && -n "${bt_opencode_variant:-}" ]] && oc_m="$oc_m#$bt_opencode_variant"
+      [[ -n "$oc_m" ]] && args+=(-m "$oc_m")
+      timeout 150 env XDG_CONFIG_HOME="${bt_opencode_config:-${TMPDIR:-/tmp}/bt-opencode-config}" \
+        OPENCODE_DISABLE_PROJECT_CONFIG=1 OPENCODE_DISABLE_CLAUDE_CODE=1 OPENCODE_DISABLE_AUTOUPDATE=1 \
+        opencode "${args[@]}" "$q" 2>"$outdir/stderr.txt" \
         | jq -rs '
             (map(select(.type=="error")) | last) as $err
             | if $err then empty
@@ -217,10 +219,10 @@ score_result() {
   score=$((score+q1)); [[ $q1 -eq 1 ]] && notes+=("Q1")
 
   echo "$t" | grep -qiE 'CODEX_HOME' && echo "$t" | grep -qiE 'ignore-user-config|/dev/null|stdin' \
-    && echo "$t" | grep -qiE 'gpt-6-astra|astra' \
+    && echo "$t" | grep -qiE 'gpt-6.2-astra|astra' \
     && { score=$((score+1)); notes+=("Q2"); } || true
 
-  echo "$t" | grep -qiE 'opencode run' && echo "$t" | grep -qiE -- '--pure|bt_opencode_model|-m' \
+  echo "$t" | grep -qiE 'opencode run' && echo "$t" | grep -qiE -- 'XDG_CONFIG_HOME|--standalone|bt_opencode_model|-m' \
     && { score=$((score+1)); notes+=("Q3"); } || true
 
   echo "$t" | grep -qiE 'cursor' && echo "$t" | grep -qiE 'grok-4\.7' \

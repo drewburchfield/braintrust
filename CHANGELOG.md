@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.16.0 — 2026-11-21
+
+Model + harness refresh. Every peer CLI was updated to its latest release and answered a live call: claude 2.1.330, agy 1.5.14, codex 0.170.0, cursor-agent 2026.11.19, grok 1.0.92, opencode 2.3.2.
+
+- Google pin moves to **Gemini 4 Neon High** (`gemini-4-neon-high`, added in agy 1.5.12). agy now lists three generation-4 families (Neon, Argon, Hydrogen), so `_agy_rank` scores families explicitly: Neon > Carbon > unknown > Argon > Hydrogen > Flash. Before, the tie fell to alphabetical order. `bt_agy_fast_model` stays `gemini-3.8-flash-high`. Neon XHigh exists but the pin stays at `-high`.
+- Codex pin moves to **GPT-6.2 Astra** (`gpt-6.2-astra`, "most capable"); fallback `gpt-6.2-sol`. The catalog now labels `gpt-6-astra` and `gpt-6.1-sol` "previous generation". Verified on codex 0.170.0.
+- **OpenCode 2.x.** 2.3 removed `run --pure` and `--variant`, so the old contract failed with `Unrecognized flag` and the probe marked OpenCode unavailable. Consults now run under an empty `XDG_CONFIG_HOME` (`$bt_opencode_config`, exported by the probe) with `OPENCODE_DISABLE_PROJECT_CONFIG=1`, `OPENCODE_DISABLE_CLAUDE_CODE=1`, `OPENCODE_DISABLE_AUTOUPDATE=1` and `--standalone`, and pass the variant inline (`-m zai-coding-plan/glm-5.3#max`). Auth in `~/.local/share/opencode` is untouched. The isolated run lists only built-in tools; the real config adds MCP tools. `run` has no `--dir`; Mode C `cd`s into the repo.
+- Cursor: when the account is on the Free plan, which refuses `grok-4.7-high` (`ActionRequiredError: Model unavailable on Free`, empty stdout), the probe steps down to the same generation at `-medium` with a fresh attempt budget, and `bt_cursor_error` falls back to stderr text. The account is on Super again, so `grok-4.7-high` answers directly. Headless runs need `--trust`.
+- Grok CLI answers again from the isolated `GROK_HOME` (`grok-4.7`). `~/.grok/hooks/herdr.json` joins hcom.json; the isolated home skips both.
+- Claude: Opus 5.5 is still the newest Opus; Fable reference is `claude-fable-5-2`.
+- Docs, eval variants, the contract-quiz rubric and the runner follow the new contracts. Codex catalog list now includes every slug.
+- Eval 2026-11-21: contract-quiz on skill-current, agy (gemini-4-neon-high), codex (gpt-6.2-astra), cursor (grok-4.7-high), grok (grok-4.7), opencode (glm-5.3#max), claude (Opus 5.5) all 10/10; no hcom or agent-bus text in any answer.
+
 ## 1.15.1 — 2026-10-23
 
 Doc-only harness refresh. Dogfooded against claude 2.1.309, agy 1.4.6 (gemini-4-argon-high), codex 0.160.1 (gpt-6-astra), cursor-agent 2026.10.22 (grok-4.7-high), opencode 1.18.34 (glm-5.3). Every documented flag is still in `--help`; every pin holds.

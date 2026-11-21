@@ -78,17 +78,18 @@ Treat local `--help` + dogfood as higher priority than blog posts.
 
 ## Exit criteria for a refresh
 
-- [ ] Probe writes a complete `/tmp/bt_models.env` (includes `bt_codex_model=gpt-6-astra` when Astra works, `bt_codex_error` when it does not)
-- [ ] Codex CLI ≥ 0.160.0 (`codex --version`); `~/.codex/models_cache.json` still lists `gpt-6-astra` (and `gpt-6.1-sol` as fallback). If a newer frontier model outranks Astra, move the pin
+- [ ] Probe writes a complete `/tmp/bt_models.env` (includes `bt_codex_model=gpt-6.2-astra` when Astra works, `bt_codex_error` when it does not)
+- [ ] Codex CLI ≥ 0.170.0 (`codex --version`); `~/.codex/models_cache.json` still lists `gpt-6.2-astra` (and `gpt-6.2-sol` as fallback). If a newer frontier model outranks Astra, move the pin
 - [ ] Every `bt_*=true` CLI returns a one-word headless ok **from its isolated home** (no agent-bus / hcom text in the answer)
 - [ ] SKILL + references mention no `gemini` binary path
-- [ ] Cursor pin is the newest `grok-X.Y-high` in `cursor-agent --list-models` (`grok-4.7-high` as of 2026-10-16)
+- [ ] Cursor pin is the newest `grok-X.Y-high` in `cursor-agent --list-models` (`grok-4.7-high` as of 2026-11-21; `-medium` only if `cursor-agent about` shows the Free tier)
 - [ ] Grok CLI (only if in use): default matches `Default model:` from an authenticated `grok models`
-- [ ] agy pin is the strongest `gemini-*-high` in `agy models` (`gemini-4-argon-high` as of 2026-10-16) and `bt_agy_fast_model` is the newest Flash High (`gemini-3.8-flash-high`). A new Gemini family name (not Flash) must still match the probe regex
+- [ ] agy pin is the strongest `gemini-*-high` in `agy models` (`gemini-4-neon-high` as of 2026-11-21; families ranked Neon > Carbon > unknown > Argon > Hydrogen > Flash) and `bt_agy_fast_model` is the newest Flash High (`gemini-3.8-flash-high`). A new Gemini family name must be added to the `_agy_rank` family table
 - [ ] agy and Cursor answers carry no hcom / agent-bus text (both load user hooks with no switch)
 - [ ] `claude -p --safe-mode` answers a "list your skills/plugins/MCP/CLAUDE.md" prompt with built-ins only
 - [ ] Claude consult model is `claude-opus-5-5[1m]` in `agents/peer.md` and the probe (haiku only for liveness); bump when a newer Opus ships
+- [ ] OpenCode isolated run (`$bt_opencode_config`) lists only built-in tools; no `Unrecognized flag` errors
 - [ ] OpenCode model matches an authed provider (`opencode auth list`) and contains `glm-5.3` (`bt_opencode_variant=max`)
-- [ ] `--pure`, `GROK_HOME`, `CODEX_HOME`, Cursor `--mode ask`, `--safe-mode` and `disableAllHooks` still neutralize the hooks listed in `failure-modes.md`
+- [ ] OpenCode empty `XDG_CONFIG_HOME` + `--standalone`, `GROK_HOME`, `CODEX_HOME`, Cursor `--mode ask`, `--safe-mode` and `disableAllHooks` still neutralize the hooks listed in `failure-modes.md`
 - [ ] `git grep` for the previous model ids and CLI versions returns only CHANGELOG hits
 - [ ] Version bumped; session note saved under `.braintrust/sessions/`

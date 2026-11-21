@@ -9,7 +9,7 @@
 #   # or, when skill is installed as a plugin:
 #   bash "${CLAUDE_PLUGIN_ROOT:-.}/scripts/bt_probe.sh"
 #
-# Design notes (2026-10-16 dogfood):
+# Design notes (2026-11-21 dogfood):
 #  * Gemini CLI is NOT probed. Google voice = agy only.
 #  * Every peer runs IDENTITY-ISOLATED. Ambient agent-bus hooks (hcom), MCP servers,
 #    memories and plugins in the user's real home hijack headless consults (a grok
@@ -19,25 +19,30 @@
 #      cursor   -> user's normal login + --mode ask (read-only: no shell, so no hcom join) +
 #                  no --approve-mcps + cmux hooks off (CMUX_CURSOR_HOOKS_DISABLED=1).
 #                  ~/.cursor/plugins may still load; never pass --plugin-dir.
-#      opencode -> --pure (skips config plugins, verified to drop hcom.ts)
+#      opencode -> XDG_CONFIG_HOME=$TMPDIR/bt-opencode-config (empty: no plugins, MCP, skills, hcom.ts)
+#                  + OPENCODE_DISABLE_PROJECT_CONFIG=1 + OPENCODE_DISABLE_CLAUDE_CODE=1 + run --standalone.
+#                  OpenCode 2.x removed --pure and --variant; auth stays in ~/.local/share/opencode.
 #      claude   -> Task tool inside Claude Code; else claude -p --safe-mode (no CLAUDE.md/MCP/plugins/hooks,
 #                  keeps keychain auth) + --settings '{"disableAllHooks":true}'
 #      agy      -> plain --print. hcom/herdr hooks live in ~/.gemini/config/hooks.json (since
-#                  2026-09-23) and agy has no switch to skip them; verified 2026-10-23 (agy 1.4.6)
+#                  2026-09-23) and agy has no switch to skip them; verified 2026-11-21 (agy 1.5.14)
 #                  that headless answers stay clean and register no hcom agent.
 #  * xAI slot: Cursor CLI (cursor-agent) first, Grok CLI second, one xAI voice per consult.
-#    Cursor pins the newest `grok-X.Y-high` it lists (grok-4.7-high as of 2026-10-16).
+#    Cursor pins the newest `grok-X.Y-high` it lists (grok-4.7-high as of 2026-11-21); on the
+#    Cursor Free plan, which refuses -high, it steps down to the same generation at -medium.
 #    Cursor has no flag to skip ~/.cursor/hooks.json or user rules, so the hcom notice
 #    line and rules still reach context; ask mode keeps them from turning into actions.
 #  * Grok CLI default comes from `grok models` ("Default model:"); fallback grok-4.7.
-#  * Codex primary model is gpt-6-astra (GPT-6 Astra, frontier). Fallback order: gpt-6-astra ->
-#    gpt-6.1-sol (latest workhorse) -> product default. Because --ignore-user-config is set, we MUST pass -m.
+#  * Codex primary model is gpt-6.2-astra (GPT-6.2 Astra, frontier). Fallback order: gpt-6.2-astra ->
+#    gpt-6.2-sol (latest workhorse) -> product default. Because --ignore-user-config is set, we MUST pass -m.
 #    A usage-limit error is reported verbatim (bt_codex_error) instead of "empty/timeout".
 #  * OpenCode uses the user's configured/default model (opencode.json "model",
 #    else last non-free session model). Expected id contains glm-5.3 (zai-coding-plan/glm-5.3);
-#    the probe warns when it does not. If the resolved id contains glm-5.3, bt_opencode_variant=max.
-#  * agy Google pin is the strongest `gemini-*-high` slug `agy models` lists (newest generation,
-#    non-Flash wins a tie): gemini-4-argon-high as of 2026-10-16. The newest
+#    the probe warns when it does not. If the resolved id contains glm-5.3, bt_opencode_variant=max,
+#    passed as `-m <model>#max` (OpenCode 2.x syntax).
+#  * agy Google pin is the strongest `gemini-*-high` slug `agy models` lists: newest generation
+#    first, then family rank neon > carbon > (unknown) > argon > hydrogen > flash.
+#    gemini-4-neon-high as of 2026-11-21. The newest
 #    `gemini-*-flash-high` (gemini-3.8-flash-high) is bt_agy_fast_model and the fallback pin.
 #  * Claude consult default is claude-opus-5-5[1m] (Opus 5.5, 1M context). Liveness probe uses haiku.
 #  * agy 1.1.0+ works bare-piped; PTY wrapper is a durable fallback.
@@ -59,6 +64,14 @@ bt_codex_home="${_bt_tmp}/bt-codex-home"
 mkdir -p "$bt_codex_home"
 printf '# braintrust isolated profile: no memories, no MCP, no hooks, no global AGENTS.md\n' > "$bt_codex_home/config.toml"
 [ -f "$HOME/.codex/auth.json" ] && cp "$HOME/.codex/auth.json" "$bt_codex_home/auth.json" 2>/dev/null
+
+# --- Clean-slate OpenCode config root (OpenCode 2.x has no --pure) ---
+# An empty XDG_CONFIG_HOME hides ~/.config/opencode (plugins incl. hcom.ts/herdr, MCP, skills).
+# Auth lives in ~/.local/share/opencode/auth.json and is unaffected.
+bt_opencode_config="${_bt_tmp}/bt-opencode-config"
+mkdir -p "$bt_opencode_config/opencode"
+oc_run() { local t="$1"; shift; (cd "$_bt_tmp" && rt "$t" env XDG_CONFIG_HOME="$bt_opencode_config" \
+  OPENCODE_DISABLE_PROJECT_CONFIG=1 OPENCODE_DISABLE_CLAUDE_CODE=1 OPENCODE_DISABLE_AUTOUPDATE=1 "$@"); }
 
 # --- Clean-slate Grok profile (no hooks, no MCP, no plugins, no Claude/Cursor compat scanning) ---
 # ~/.grok/hooks/*.json (e.g. hcom) fire on SessionStart and hijack headless answers.
@@ -149,13 +162,14 @@ fi
 security find-generic-password -s "Antigravity Safe Storage" >/dev/null 2>&1 || true
 
 # --- Antigravity (agy) - ONLY Google path ---
-# Pin the strongest Gemini "High" slug the account lists: newest generation first, and on a
-# tie a non-Flash family wins (gemini-4-argon-high as of 2026-10-16). The newest
+# Pin the strongest Gemini "High" slug the account lists: newest generation first, then the
+# family rank neon > carbon > unknown > argon > hydrogen > flash (gemini-4-neon-high as of
+# 2026-11-21). Families are ranked explicitly because several now share a generation. The newest
 # gemini-*-flash-high (gemini-3.8-flash-high) is the fast fallback when the pin fails.
 # Parse --output-format json (.status / .response). Text + PTY remain fallbacks.
 _agy_rank() {
   grep -oE '^gemini-[0-9]+(\.[0-9]+)?-[a-z]+-high' \
-    | awk '{n=split($0,p,"-"); split(p[2],v,"."); mi=(v[2]==""?0:v[2]); fl=(p[3]=="flash")?0:1; print v[1], mi, fl, $0}' \
+    | awk '{n=split($0,p,"-"); split(p[2],v,"."); mi=(v[2]==""?0:v[2]); f=p[3]; fl=(f=="neon")?5:(f=="carbon")?4:(f=="argon")?2:(f=="hydrogen")?1:(f=="flash")?0:3; print v[1], mi, fl, $0}' \
     | sort -k1,1n -k2,2n -k3,3n | tail -1 | awk '{print $4}'
 }
 resolve_agy_model() { printf '%s\n' "$1" | _agy_rank; }
@@ -202,16 +216,16 @@ probe_agy() {
   echo "Antigravity (agy): available [Google AI only; pty=$agy_needs_pty; model=${picked:-account-tier}; fast=${fast:-none}]" > "$D/agy.log"
 }
 
-# --- Codex (isolated clean-slate + ignore-user-config; primary model gpt-6-astra) ---
-# GPT-6 Astra is the frontier OpenAI model for this slot (verified on Codex CLI 0.160.0).
-# Fallback order: gpt-6-astra -> gpt-6.1-sol -> product default.
+# --- Codex (isolated clean-slate + ignore-user-config; primary model gpt-6.2-astra) ---
+# GPT-6.2 Astra is the frontier OpenAI model for this slot (verified on Codex CLI 0.170.0).
+# Fallback order: gpt-6.2-astra -> gpt-6.2-sol -> product default.
 # Usage-limit / auth errors are captured from the JSONL `error` event and reported.
 probe_codex() {
-  printf 'bt_codex_available=false\nbt_codex_model=gpt-6-astra\nbt_codex_error=\n' > "$D/codex.env"
+  printf 'bt_codex_available=false\nbt_codex_model=gpt-6.2-astra\nbt_codex_error=\n' > "$D/codex.env"
   command -v codex &>/dev/null || { echo "Codex: not installed" > "$D/codex.log"; return; }
   local out rc model="" ver err="" raw="$D/codex.jsonl"
   ver=$(codex --version 2>/dev/null | head -1)
-  for model in "gpt-6-astra" "gpt-6.1-sol" ""; do
+  for model in "gpt-6.2-astra" "gpt-6.2-sol" ""; do
     for a in 1 2; do
       local margs=()
       [ -n "$model" ] && margs=(-m "$model")
@@ -236,8 +250,8 @@ probe_codex() {
   if grep -q 'bt_codex_available=true' "$D/codex.env"; then
     # shellcheck disable=SC1090
     . "$D/codex.env"
-    if [ "${bt_codex_model:-}" = "gpt-6-astra" ]; then
-      echo "Codex: available ($ver; model=gpt-6-astra / GPT-6 Astra; isolated + --ignore-user-config)" > "$D/codex.log"
+    if [ "${bt_codex_model:-}" = "gpt-6.2-astra" ]; then
+      echo "Codex: available ($ver; model=gpt-6.2-astra / GPT-6.2 Astra; isolated + --ignore-user-config)" > "$D/codex.log"
     elif [ -z "${bt_codex_model:-}" ]; then
       echo "Codex: available ($ver; product default; Astra and Sol unavailable — upgrade: npm i -g @openai/codex@latest)" > "$D/codex.log"
     else
@@ -251,7 +265,7 @@ probe_codex() {
 }
 
 # --- Grok (Grok Build; xAI fallback only; advertised default from `grok models`, fallback grok-4.7) ---
-# Unverified since grok 1.0.30: not in active use as of 2026-10-16 (Cursor fills the xAI slot).
+# Verified on grok 1.0.92 (2026-11-21) from the isolated GROK_HOME; Cursor still fills the xAI slot first.
 resolve_grok_model() {
   local listing default cand
   listing=$(rt 30 env GROK_HOME="$bt_grok_home" GROK_DISABLE_AUTOUPDATER=1 grok models 2>/dev/null) || true
@@ -311,21 +325,32 @@ probe_cursor() {
   listing=$(cursor_run 30 "$bin" --list-models 2>/dev/null) || true
   model=$(resolve_cursor_model "$listing")
   [ -n "$model" ] || model="grok-4.7-high"
-  for a in 1 2; do
+  local note="" err_file="$D/cursor.err"
+  local tries=0
+  while [ "$tries" -lt 2 ]; do
     cursor_run 90 "$bin" -p "Reply with the single word: ok" \
       --model "$model" --output-format json --mode ask --trust --workspace "${TMPDIR:-/tmp}" \
-      < /dev/null > "$raw" 2>/dev/null
+      < /dev/null > "$raw" 2>"$err_file"
     out=$(jq -r 'select(.is_error != true) | .result // empty' "$raw" 2>/dev/null)
     if echo "$out" | grep -qi ok; then
       printf 'bt_cursor_available=true\nbt_cursor_model=%s\nbt_cursor_error=\n' "$model" > "$D/cursor.env"
       break
     fi
+    # Cursor Free refuses the -high/-xhigh Grok variants (ActionRequiredError on stderr,
+    # empty stdout) but includes the same generation at -medium. Step down once, with
+    # a fresh attempt budget, so the recorded model is always one that was tried.
+    if [ -z "$note" ] && grep -q 'unavailable on Free' "$err_file" 2>/dev/null && [ "${model%-high}" != "$model" ]; then
+      model="${model%-high}-medium"; note="; Cursor Free plan, -high refused"; tries=0; continue
+    fi
+    tries=$((tries + 1))
   done
   if grep -q 'bt_cursor_available=true' "$D/cursor.env"; then
-    echo "Cursor CLI: available ($ver; model=$model; --mode ask, cmux hooks off)" > "$D/cursor.log"
+    echo "Cursor CLI: available ($ver; model=$model; --mode ask, cmux hooks off$note)" > "$D/cursor.log"
   else
     local err
-    err=$(jq -r 'select(.is_error == true) | .result // .error // empty' "$raw" 2>/dev/null | tr -d '\n"'"'"'`$\\' | cut -c1-160)
+    err=$(jq -r 'select(.is_error == true) | .result // .error // empty' "$raw" 2>/dev/null)
+    [ -n "$err" ] || err=$(grep -m1 -E 'Error|error' "$err_file" 2>/dev/null)
+    err=$(printf '%s' "$err" | tr -d '\n"'"'"'`$\\' | cut -c1-160)
     printf 'bt_cursor_available=false\nbt_cursor_model=%s\nbt_cursor_error="%s"\n' "$model" "$err" > "$D/cursor.env"
     echo "Cursor CLI: no answer from $model ($ver)${err:+ — $err}" > "$D/cursor.log"
   fi
@@ -394,11 +419,13 @@ probe_opencode() {
       src="last-session"
     fi
   fi
-  local cmd=(opencode run --format json --auto --pure)
-  [ -n "$model" ] && cmd+=(-m "$model")
+  local cmd=(opencode run --standalone --format json --auto)
+  local mflag="$model"
+  case "$model" in *glm-5.3*) mflag="$model#max" ;; esac
+  [ -n "$model" ] && cmd+=(-m "$mflag")
   cmd+=("Reply with the single word: ok")
   for a in 1 2; do
-    out=$(rt 60 "${cmd[@]}" 2>/dev/null | jq -rs 'map(select(.type=="text") | .part.text // .text // empty) | map(select(length>0)) | last // empty' 2>/dev/null)
+    out=$(oc_run 60 "${cmd[@]}" 2>/dev/null | jq -rs 'map(select(.type=="text") | .part.text // .text // empty) | map(select(length>0)) | last // empty' 2>/dev/null)
     rc=${PIPESTATUS[0]:-0}
     if echo "$out" | grep -qi ok; then
       if [ -z "$model" ] && command -v sqlite3 &>/dev/null && [ -f "$HOME/.local/share/opencode/opencode.db" ]; then
@@ -420,7 +447,7 @@ print(mid if (pid and mid.startswith(pid+"/")) else (f"{pid}/{mid}" if pid and m
   if grep -q true "$D/opencode.env"; then
     local warn=""
     case "$model" in *glm-5.3*) ;; *) warn="; WARN expected a glm-5.3 id (set \"model\": \"zai-coding-plan/glm-5.3\" in ~/.config/opencode/opencode.json)" ;; esac
-    echo "OpenCode: available (model=${model:-unset}; source=$src; variant=${variant:-}; --pure drops config plugins${warn})" > "$D/opencode.log"
+    echo "OpenCode: available (model=${model:-unset}; source=$src; variant=${variant:-}; isolated XDG_CONFIG_HOME, --standalone${warn})" > "$D/opencode.log"
   else
     echo "OpenCode: found but no model responded (auth: opencode auth login; set model in ~/.config/opencode/opencode.json)" > "$D/opencode.log"
   fi
@@ -477,7 +504,7 @@ bt_agy_model=${bt_agy_model:-}
 bt_agy_fast_model=${bt_agy_fast_model:-}
 bt_codex_available=${bt_codex_available:-false}
 bt_codex_home=${bt_codex_home:-${TMPDIR:-/tmp}/bt-codex-home}
-bt_codex_model=${bt_codex_model-gpt-6-astra}
+bt_codex_model=${bt_codex_model-gpt-6.2-astra}
 bt_codex_error="${bt_codex_error:-}"
 bt_cursor_available=${bt_cursor_available:-false}
 bt_cursor_model=${bt_cursor_model:-grok-4.7-high}
@@ -489,10 +516,11 @@ bt_xai_via=${bt_xai_via:-}
 bt_opencode_available=${bt_opencode_available:-false}
 bt_opencode_model=${bt_opencode_model:-}
 bt_opencode_variant=${bt_opencode_variant:-}
+bt_opencode_config=${bt_opencode_config:-${TMPDIR:-/tmp}/bt-opencode-config}
 bt_claude_cli_available=${bt_claude_cli_available:-false}
 bt_claude_model="${bt_claude_model:-claude-opus-5-5[1m]}"
 bt_probe_ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-bt_probe_version=1.15.1
+bt_probe_version=1.16.0
 EOF
 
 rm -rf "$D"

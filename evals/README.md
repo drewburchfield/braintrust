@@ -10,6 +10,15 @@ Hosts inject skill text into context. More text is not free. This harness measur
 2. **Contract accuracy** on a stable public quiz (no private data)
 3. **Cross-peer consistency** (same fixture, many CLIs)
 
+## peerpanel tests
+
+```bash
+python3 -m unittest evals/test_peerpanel.py -v      # offline: parsing, status names, retry, read-only flags, brief shape
+bash evals/run_eval.sh peerpanel-quiz skill-current agy,codex,cursor,opencode   # live: do peers read the skill right?
+```
+
+Run the unit tests after any change to `bin/peerpanel` and after any CLI flag change. `peerpanel ping` is the live smoke test for the exact consult command lines.
+
 ## Quick start
 
 ```bash

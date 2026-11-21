@@ -219,10 +219,18 @@ class Process(unittest.TestCase):
     def tearDown(self):
         pp.build_cmd = self.real
 
-    def child(self, code):
+    def child(self, code, kind="cursor"):
         def fake(peer, prompt, env, root, model_override=None, timeout=480):
-            return [sys.executable, "-c", code], dict(os.environ), self.root, "cursor", "m"
+            return [sys.executable, "-c", code], dict(os.environ), self.root, kind, "m"
         pp.build_cmd = fake
+
+    def test_stream_dying_mid_answer_is_not_ok(self):
+        self.child("import json, sys; "
+                   "print(json.dumps({'type': 'item.completed', 'item': {'type': 'agent_message', "
+                   "'text': 'I will read the files first.'}})); sys.exit(2)", kind="codex")
+        r = pp.run_once("codex", "Q", ENV, self.root, 20)
+        self.assertEqual(r["status"], "error")
+        self.assertEqual(r["answer"], "")
 
     def test_lingering_grandchild_does_not_hold_the_seat(self):
         # the child answers and exits; a grandchild keeps the inherited stdout open for 30s

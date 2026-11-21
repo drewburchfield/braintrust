@@ -521,6 +521,7 @@ bt_claude_cli_available=${bt_claude_cli_available:-false}
 bt_claude_model="${bt_claude_model:-claude-opus-5-5[1m]}"
 bt_probe_ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 bt_probe_version=1.17.0
+bt_probe_in_claude_code=$( [ -n "${CLAUDECODE:-}${CLAUDE_CODE_ENTRYPOINT:-}" ] && echo true || echo false )
 EOF
 
 rm -rf "$D"

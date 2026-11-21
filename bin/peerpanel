@@ -163,6 +163,8 @@ def run_probe(quiet=False, limit=300):
     try:
         p = subprocess.Popen(["bash", str(PROBE)], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                              stderr=subprocess.STDOUT, text=True, env=probe_path_env(), start_new_session=True)
+        with CHILD_LOCK:
+            CHILDREN.add(p.pid)
         out, _ = p.communicate(timeout=limit)
         lines = out.splitlines()
     except subprocess.TimeoutExpired:
@@ -191,7 +193,8 @@ def ensure_env(max_age=240, force=False, quiet=False):
         raise SystemExit("peerpanel: the probe needs jq (brew install jq)")
     env = load_env()
     age = probe_age_min(env)
-    stale = age is None or age > max_age or env.get("bt_probe_version") != VERSION
+    host_flip = env.get("bt_probe_in_claude_code", "") != ("true" if in_claude_code() else "false")
+    stale = age is None or age > max_age or env.get("bt_probe_version") != VERSION or host_flip
     blocked = STATE / "probe-timeout"
     if stale and not force and blocked.exists() and time.time() - blocked.stat().st_mtime < 1800 and env:
         eprint("peerpanel: last probe timed out under 30 min ago; reusing the old cache (probe --force retries)")
@@ -478,6 +481,10 @@ def run_once(peer, prompt, env, root, timeout, outdir=None, tag="", model_overri
     fe.close()
     secs = round(time.time() - t0, 1)
     answer, err = parse_output(kind, out or "")
+    if kind in ("codex", "opencode") and p.returncode not in (0, None) and not timed_out and not err:
+        # a stream that died without an error event: its last text is progress, not an answer
+        err = short_reason("", errs) or "exited %s mid-stream" % p.returncode
+        answer = ""
     if kind == "text":
         # The agy PTY wrapper merges stderr into its output and exits 124 on timeout, 1 when empty.
         if p.returncode == 124:
@@ -509,7 +516,7 @@ def run_peer(peer, prompt, env, root, timeout, outdir=None, deadline=None, nonce
         override = env["bt_agy_fast_model"]
     if peer == "codex" and r.get("model") != "gpt-6.2-sol":
         override = "gpt-6.2-sol" if r["status"] == "model" else None
-    if r["status"] in RETRYABLE or (r["status"] == "model" and override):
+    if r["status"] in RETRYABLE | {"error"} or (r["status"] == "model" and override):
         left = None if deadline is None else deadline - time.time()
         if left is None or left > min(60, timeout):
             t2 = timeout if left is None else min(timeout, int(left))
@@ -720,12 +727,15 @@ def inline_sources(srcs, budget=60000, per_file=20000):
             skipped.append(str(f))
             continue
         cut = ""
-        if len(txt) > per_file:
-            txt, cut = txt[:per_file], "\n[... truncated at %d chars]" % per_file
-        if used + len(txt) > budget:
+        # budget in UTF-8 bytes: the prompt travels as one argv entry (Linux caps one argument at 128 KiB)
+        if len(txt.encode("utf-8")) > per_file:
+            txt = txt.encode("utf-8")[:per_file].decode("utf-8", "ignore")
+            cut = "\n[... truncated at %d bytes]" % per_file
+        size = len(txt.encode("utf-8"))
+        if used + size > budget:
             skipped.append(str(f))
             continue
-        used += len(txt)
+        used += size
         parts.append("### %s\n```\n%s%s\n```" % (f, txt, cut))
     if skipped:
         parts.append("Not inlined (budget, binary or secret-looking): %s" % ", ".join(skipped[:40]))
@@ -829,11 +839,14 @@ def cmd_consult(args):
     errs, warns = check_brief(brief)
     if errs:
         return 2
+    out = Path(args.out).resolve() if args.out else brief / "runs" / stamp()
+    if (out / "status.json").exists():
+        eprint("peerpanel: %s already holds a run; pass a new --out" % out)
+        return 2
     env = ensure_env(quiet=False)
     peers = [p for p in parse_peers(args.peers) if p not in parse_peers(args.host or "") or not args.host]
     if args.host:
         eprint("peerpanel: host is %s; its seat is left out" % ",".join(parse_peers(args.host)))
-    out = Path(args.out).resolve() if args.out else brief / "runs" / stamp()
     out.mkdir(parents=True, exist_ok=True)
 
     results = {}
@@ -857,7 +870,10 @@ def cmd_consult(args):
     if not args.no_ping and run_peers:
         cached = recent_ping()
         ping = {}
-        need = [p for p in run_peers if not (cached and cached.get(p, {}).get("status") == "ok")]
+        def same_model(p):
+            c = (cached or {}).get(p, {})
+            return c.get("status") == "ok" and c.get("model") == build_cmd(p, "", env, TMP)[4]
+        need = [p for p in run_peers if not same_model(p)]
         if need:
             eprint("peerpanel: preflight ping %s..." % ", ".join(need))
             ns = argparse.Namespace(peers=",".join(need), timeout=args.ping_timeout, silent=True)
@@ -866,7 +882,8 @@ def cmd_consult(args):
             pr = ping.get(p)
             if not pr or pr["status"] == "ok":
                 continue
-            if pr["status"] in RETRYABLE | {"error"}:  # slow, flaky or unclear: still worth a full attempt
+            fallback = pr["status"] == "model" and p in ("codex", "agy")
+            if pr["status"] in RETRYABLE | {"error"} or fallback:  # slow, flaky, unclear or has a fallback model
                 eprint("peerpanel: %s preflight %s; running it anyway" % (LABEL[p], pr["status"]))
                 continue
             results[p] = {"status": "skipped", "reason": "preflight %s: %s" % (pr["status"], pr.get("reason", "")),

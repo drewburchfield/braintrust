@@ -314,10 +314,16 @@ if [[ "$FIXTURE" == "matrix" ]]; then
   PEERS_CSV_SAVE="$PEERS_CSV"
   VARIANT_SAVE="${VARIANT:-all}"
   for fix in peerpanel-quiz contract-quiz ops-edge; do
-    echo "======== MATRIX fixture=$fix variants=$VARIANT_SAVE peers=$PEERS_CSV_SAVE ========"
+    v="$VARIANT_SAVE"
+    # Since 1.17 the skill delegates raw CLI lines to peerpanel and references/, so the raw-contract
+    # quizzes run against skill-full and peerpanel-quiz runs against the shipping skill.
+    if [[ "$v" == "all" ]]; then
+      if [[ "$fix" == "peerpanel-quiz" ]]; then v="skill-current"; else v="skill-full"; fi
+    fi
+    echo "======== MATRIX fixture=$fix variants=$v peers=$PEERS_CSV_SAVE ========"
     # re-enter as single-fixture run into a nested dir under matrix
-    FIXTURE="$fix" VARIANT="$VARIANT_SAVE" PEERS_CSV="$PEERS_CSV_SAVE" \
-      bash "$ROOT/evals/run_eval.sh" "$fix" "$VARIANT_SAVE" "$PEERS_CSV_SAVE" \
+    FIXTURE="$fix" VARIANT="$v" PEERS_CSV="$PEERS_CSV_SAVE" \
+      bash "$ROOT/evals/run_eval.sh" "$fix" "$v" "$PEERS_CSV_SAVE" \
       | tee "$MATRIX_ROOT/${fix}.log"
     # append latest summary for this fixture
     latest=$(ls -1dt evals/runs/*-"$fix" 2>/dev/null | head -1)

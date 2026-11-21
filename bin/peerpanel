@@ -87,10 +87,23 @@ def in_claude_code():
     return bool(os.environ.get("CLAUDECODE") or os.environ.get("CLAUDE_CODE_ENTRYPOINT"))
 
 
+def owned_by_me(path):
+    """True when path exists, belongs to this user and is not writable by group or others.
+    /tmp is shared on macOS, so a cache or home another account planted there must not be trusted."""
+    try:
+        st = os.lstat(str(path))
+    except OSError:
+        return False
+    return st.st_uid == os.getuid() and not (st.st_mode & 0o022)
+
+
 def load_env(path=MODELS_ENV):
     env = {}
     if not path.exists():
         return env
+    if not owned_by_me(path):
+        raise SystemExit("peerpanel: %s is not owned by you or is writable by others; delete it and run "
+                         "peerpanel probe --force" % path)
     for line in path.read_text(errors="replace").splitlines():
         m = re.match(r"^([A-Za-z_][A-Za-z0-9_]*)=(.*)$", line.strip())
         if m:
@@ -98,6 +111,10 @@ def load_env(path=MODELS_ENV):
             if len(v) >= 2 and v[0] == v[-1] and v[0] in "\"'":
                 v = v[1:-1]
             env[m.group(1)] = v
+    # isolated homes and the OpenCode config root must be this user's own folders
+    for key in ("bt_codex_home", "bt_grok_home", "bt_opencode_config"):
+        if env.get(key) and Path(env[key]).exists() and not owned_by_me(env[key]):
+            raise SystemExit("peerpanel: %s=%s is not owned by you or is writable by others" % (key, env[key]))
     return env
 
 

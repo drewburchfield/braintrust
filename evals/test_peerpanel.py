@@ -149,6 +149,17 @@ class Commands(unittest.TestCase):
         self.assertEqual(oc["OPENCODE_DISABLE_PROJECT_CONFIG"], "1")
         self.assertIn("--safe-mode", pp.build_cmd("claude", "Q", ENV, "/r")[0])
 
+    def test_shared_cache_must_be_mine(self):
+        f = Path(tempfile.mkdtemp(prefix="pp-own-")) / "models.env"
+        f.write_text("bt_codex_model=gpt-6.2-astra\n")
+        f.chmod(0o644)
+        self.assertTrue(pp.owned_by_me(f))
+        self.assertEqual(pp.load_env(f)["bt_codex_model"], "gpt-6.2-astra")
+        f.chmod(0o666)
+        self.assertFalse(pp.owned_by_me(f))
+        with self.assertRaises(SystemExit):
+            pp.load_env(f)
+
     def test_peer_aliases(self):
         self.assertEqual(pp.parse_peers("gemini,gpt,grok,glm"), ["agy", "codex", "xai", "opencode"])
 

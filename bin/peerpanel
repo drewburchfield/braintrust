@@ -180,6 +180,8 @@ def run_probe(quiet=False, limit=300):
                 eprint("  " + line)
     default = Path("/tmp/bt_models.env")
     if MODELS_ENV != default and default.exists():
+        if not owned_by_me(default):
+            raise SystemExit("peerpanel: %s is not owned by you or is writable by others; delete it" % default)
         shutil.copyfile(default, MODELS_ENV)  # the probe always writes /tmp/bt_models.env
     return load_env()
 
